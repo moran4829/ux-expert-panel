@@ -1,0 +1,58 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Noto Sans Hebrew", ui-sans-serif, system-ui, sans-serif;
+
+  /* Podium / CodeOasis design tokens */
+  --color-podium-primary: #e4257d;
+  --color-podium-primary-hover: #c91f6c;
+  --color-podium-primary-light: #fdf2f7;
+  --color-podium-primary-muted: #fce7f0;
+
+  --color-podium-sidebar: #161922;
+  --color-podium-sidebar-hover: #22252f;
+  --color-podium-sidebar-active: #2a2d38;
+  --color-podium-sidebar-border: #2e3140;
+
+  --color-podium-bg: #f5f6f8;
+  --color-podium-surface: #ffffff;
+  --color-podium-surface-muted: #fafbfc;
+
+  --color-podium-border: #e8eaed;
+  --color-podium-border-strong: #d1d5db;
+
+  --color-podium-text: #1a1d26;
+  --color-podium-text-secondary: #6b7280;
+  --color-podium-text-tertiary: #9ca3af;
+  --color-podium-text-inverse: #ffffff;
+
+  --color-podium-success: #16a34a;
+  --color-podium-success-bg: #ecfdf3;
+  --color-podium-warning: #d97706;
+  --color-podium-warning-bg: #fffbeb;
+  --color-podium-danger: #dc2626;
+  --color-podium-danger-bg: #fef2f2;
+  --color-podium-info: #2563eb;
+  --color-podium-info-bg: #eff6ff;
+
+  --radius-podium-sm: 6px;
+  --radius-podium-md: 8px;
+  --radius-podium-lg: 12px;
+  --radius-podium-xl: 16px;
+
+  --shadow-podium-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-podium-md: 0 4px 12px rgba(16, 24, 40, 0.06);
+
+  --icon-size-sm: 16px;
+  --icon-size-md: 18px;
+  --icon-size-lg: 20px;
+  --icon-stroke: 1.5;
+}
+
+body {
+  font-family: 'Noto Sans Hebrew', sans-serif;
+  background-color: var(--color-podium-bg);
+  color: var(--color-podium-text);
+  -webkit-font-smoothing: antialiased;
+}
