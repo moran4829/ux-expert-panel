@@ -3,10 +3,12 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 import { expertSkillsApiPlugin } from './vite-skills-api';
+import { llmApiPlugin } from './vite-llm-api';
+import { materialApiPlugin } from './vite-material-api';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss(), expertSkillsApiPlugin()],
+    plugins: [react(), tailwindcss(), expertSkillsApiPlugin(), llmApiPlugin(), materialApiPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

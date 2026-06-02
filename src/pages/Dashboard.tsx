@@ -6,6 +6,7 @@ import { Card, CardHeader } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { ExpertAvatar } from '../components/ui/ExpertAvatar';
+import { formatProjectCompletedLabel } from '../lib/formatDate';
 
 export function Dashboard() {
   const { projects, navigate, setCurrentProjectId, experts } = useAppContext();
@@ -55,11 +56,11 @@ export function Dashboard() {
           </p>
         </div>
         <Button
-          onClick={() => navigate('new-test')}
+          onClick={() => navigate('expert-test')}
           size="lg"
-          icon={<PlayIcon className="fill-current" size={16} />}
+          icon={<PlayIcon className="fill-current rotate-180" size={16} />}
         >
-          התחלת בדיקה חדשה
+          בדיקת מומחים חדשה
         </Button>
       </header>
 
@@ -137,7 +138,9 @@ export function Dashboard() {
 
               <div className="flex items-center gap-5">
                 <div className="hidden md:flex flex-col items-end gap-1">
-                  <span className="text-sm font-medium text-[var(--color-podium-text-secondary)]">הושלם לפני יומיים</span>
+                  <span className="text-sm font-medium text-[var(--color-podium-text-secondary)]">
+                    {formatProjectCompletedLabel(project)}
+                  </span>
                   <StatusBadge status="success" label="הדוח מוכן" />
                 </div>
 

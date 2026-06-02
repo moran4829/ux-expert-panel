@@ -1,3 +1,7 @@
+import type { TestMaterial } from './types/material';
+
+export type { TestMaterial, MaterialKind } from './types/material';
+
 export type TestType = 'live_site' | 'static_design' | 'flow' | 'video' | 'prototype' | 'prd' | 'comparison' | 'retest';
 
 export interface Expert {
@@ -28,22 +32,39 @@ export interface DiscussionMessage {
   timestamp: string;
 }
 
+export interface UserPersona {
+  id: string;
+  title: string;
+  description: string;
+}
+
+export type ReviewKind = 'expert' | 'user';
+
 export interface ReviewProject {
   id: string;
   name: string;
+  /** expert = פאנל מומחים; user = סימולציית פרסונות */
+  reviewKind: ReviewKind;
   testType: TestType;
   domain: string;
   goal: string;
   stage: string;
   targetAudience: string;
   url?: string;
+  /** Parsed/uploaded material for vision + context (not just the url string) */
+  material?: TestMaterial;
   selectedExperts: string[];
+  /** רלוונטי לבדיקות משתמשים / כשהופעל במפורש בבדיקת מומחים (legacy) */
   userTestingEnabled: boolean;
+  personas?: UserPersona[];
   status: 'draft' | 'running' | 'completed';
   createdAt: string;
+  /** מתי הבדיקה הסתיימה (דוח / סימולציה) */
+  completedAt?: string;
   scores?: Record<string, number>;
   messages?: DiscussionMessage[];
   findings?: Finding[];
+  executiveSummary?: string;
 }
 
 export interface Finding {

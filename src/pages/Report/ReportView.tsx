@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { DEFAULT_FINDINGS, useAppContext } from '../../AppContext';
+import React, { useEffect, useState } from 'react';
+import { useAppContext } from '../../AppContext';
+import { buildExecutiveSummary } from '../../lib/reportFromDiscussion';
+import { showUserSimulationInReport } from '../../lib/projectKind';
 import {
   ChevronRightIcon,
   DownloadIcon,
-  FilterIcon,
   TargetIcon,
   AlertTriangleIcon,
   CheckCircleIcon,
@@ -23,8 +24,10 @@ export function ReportView() {
 
   if (!project) return <div>Project not found</div>;
 
-  const findings = project.findings ?? DEFAULT_FINDINGS;
+  const findings = project.findings ?? [];
   const overallScore = project.scores?.overall ?? 72;
+  const executiveSummary =
+    project.executiveSummary ?? buildExecutiveSummary(findings, experts, project);
 
   const getSeverityVariant = (sev: string): 'danger' | 'warning' | 'info' | 'default' => {
     switch (sev) {
@@ -55,10 +58,18 @@ export function ReportView() {
     }
   };
 
+  const showUserTab = showUserSimulationInReport(project);
+
+  useEffect(() => {
+    if (!showUserTab && activeTab === 'userTesting') {
+      setActiveTab('summary');
+    }
+  }, [showUserTab, activeTab]);
+
   const tabs = [
     { id: 'summary' as const, label: 'תקציר מנהלים' },
     { id: 'findings' as const, label: `ממצאים והמלצות (${findings.length})` },
-    { id: 'userTesting' as const, label: 'סימולציית משתמשים' },
+    ...(showUserTab ? [{ id: 'userTesting' as const, label: 'סימולציית משתמשים' }] : []),
   ];
 
   return (
@@ -69,7 +80,7 @@ export function ReportView() {
             onClick={() => navigate('dashboard')}
             className="flex items-center gap-1 text-[var(--color-podium-text-secondary)] hover:text-[var(--color-podium-text)] font-medium text-sm mb-4 transition-colors"
           >
-            <ChevronRightIcon size={16} /> חזרה ללוח בקרה
+            <ChevronRightIcon size={16} /> חזרה לעמוד הבית
           </button>
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-2xl font-bold text-[var(--color-podium-text)]">{project.name}</h1>
@@ -81,12 +92,7 @@ export function ReportView() {
           </p>
         </div>
 
-        <div className="flex gap-3">
-          <Button variant="secondary" icon={<FilterIcon className="text-[var(--color-podium-text-tertiary)]" size={16} />}>
-            סינון ממצאים
-          </Button>
-          <Button icon={<DownloadIcon size={16} />}>ייצוא ל-PDF</Button>
-        </div>
+        <Button icon={<DownloadIcon size={16} />}>ייצוא ל-PDF</Button>
       </header>
 
       <div className="flex gap-1 border-b border-[var(--color-podium-border)] mb-8 bg-[var(--color-podium-surface-muted)] p-1 rounded-t-[var(--radius-podium-lg)]">
@@ -128,13 +134,15 @@ export function ReportView() {
                 <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-bold text-[var(--color-podium-text)]">{overallScore}</span>
               </div>
               <h3 className="font-bold text-[var(--color-podium-text)] mt-2 text-sm">ציון חוויה משוקלל</h3>
-              <p className="text-xs text-[var(--color-podium-text-tertiary)] mt-1">ממוצע של 4 מומחים</p>
+              <p className="text-xs text-[var(--color-podium-text-tertiary)] mt-1">
+                מבוסס על {project.selectedExperts.length} מומחים ו-{findings.length} ממצאים מהדיון
+              </p>
             </Card>
 
             <Card className="md:col-span-3">
               <h3 className="font-bold text-[var(--color-podium-text)] mb-3 text-base">שורה תחתונה מפי המומחים</h3>
               <p className="text-[var(--color-podium-text-secondary)] leading-relaxed text-sm">
-                המוצר במצב סביר (72), אך סובל מבעיה קריטית של <strong className="text-[var(--color-podium-text)]">אמון ועומס קוגניטיבי בשלב הסיום</strong>. המשתמשים מקבלים יותר מדי אפשרויות לא מעוגנות, ומתקשים להבין אם הפעולה הבאה דורשת אשראי או לא. שינוי פשוט בקופירייטינג וצמצום חלופות התמחור ל-3 צפוי לייצר קפיצה מיידית בהמרה.
+                {executiveSummary}
               </p>
             </Card>
           </div>
@@ -161,6 +169,11 @@ export function ReportView() {
 
       {activeTab === 'findings' && (
         <div className="space-y-5 animate-in fade-in">
+          {findings.length === 0 ? (
+            <Card padding="lg" className="text-center text-[var(--color-podium-text-secondary)] text-sm">
+              אין ממצאים בדוח זה. הפיקו דוח רק לאחר דיון שהסתיים, כדי שהתובנות יישמרו מהשיחה בין המומחים.
+            </Card>
+          ) : null}
           {findings.map((finding) => (
             <Card key={finding.id} padding="none" className="overflow-hidden flex flex-col md:flex-row">
               <div className="p-6 md:w-3/4 flex flex-col">

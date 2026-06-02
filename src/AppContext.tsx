@@ -5,6 +5,8 @@ import { buildExpertSkillMarkdown, syncExpertSkillsToProject } from './lib/exper
 import { DEFAULT_FINDINGS, DEFAULT_REPORT_SCORES } from './data/defaultFindings';
 import { Expert, ExpertEditableFields, ExpertOverrides, ReviewProject } from './types';
 import { loadFromStorage, saveToStorage, STORAGE_KEYS } from './lib/storage';
+import { DEFAULT_LLM_SETTINGS } from './lib/llmDefaults';
+import { LlmSettings } from './types/llm';
 
 interface AppContextType {
   activeRoute: string;
@@ -20,8 +22,18 @@ interface AppContextType {
   resetExpert: (id: string) => Promise<void>;
   resetAllExperts: () => Promise<void>;
   syncAllSkills: () => Promise<{ ok: boolean; message: string }>;
-  importAppData: (data: { projects?: ReviewProject[]; expertOverrides?: ExpertOverrides }) => void;
-  exportAppData: () => { projects: ReviewProject[]; expertOverrides: ExpertOverrides };
+  llmSettings: LlmSettings;
+  setLlmSettings: React.Dispatch<React.SetStateAction<LlmSettings>>;
+  importAppData: (data: {
+    projects?: ReviewProject[];
+    expertOverrides?: ExpertOverrides;
+    llmSettings?: LlmSettings;
+  }) => void;
+  exportAppData: () => {
+    projects: ReviewProject[];
+    expertOverrides: ExpertOverrides;
+    llmSettings: LlmSettings;
+  };
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -30,15 +42,17 @@ const INITIAL_PROJECTS: ReviewProject[] = [
   {
     id: 'proj-1',
     name: 'תהליך הצטרפות לביטוח רכב',
+    reviewKind: 'expert',
     testType: 'flow',
     domain: 'ביטוח',
     goal: 'האם המשתמש מבין מתי הוא מסיים את התהליך ומה הכיסויים',
     stage: 'אתר חי',
     targetAudience: 'לקוחות קיימים וחדשים, גיל 25-60',
     selectedExperts: ['ux_don_norman', 'behavioral_economics', 'accessibility_wcag', 'marketing_cro'],
-    userTestingEnabled: true,
+    userTestingEnabled: false,
     status: 'completed',
-    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+    createdAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
     scores: {
       overall: 78,
       usability: 82,
@@ -51,12 +65,27 @@ const INITIAL_PROJECTS: ReviewProject[] = [
   },
 ];
 
+function normalizeProject(project: ReviewProject): ReviewProject {
+  const reviewKind = project.reviewKind ?? 'expert';
+  if (project.status === 'completed' && !project.completedAt) {
+    return { ...project, reviewKind, completedAt: project.createdAt };
+  }
+  return { ...project, reviewKind };
+}
+
 function loadInitialProjects(): ReviewProject[] {
-  return loadFromStorage<ReviewProject[]>(STORAGE_KEYS.projects) ?? INITIAL_PROJECTS;
+  const stored = loadFromStorage<ReviewProject[]>(STORAGE_KEYS.projects);
+  if (!stored) return INITIAL_PROJECTS;
+  return stored.map(normalizeProject);
 }
 
 function loadInitialExpertOverrides(): ExpertOverrides {
   return loadFromStorage<ExpertOverrides>(STORAGE_KEYS.expertOverrides) ?? {};
+}
+
+function loadInitialLlmSettings(): LlmSettings {
+  const saved = loadFromStorage<Partial<LlmSettings>>(STORAGE_KEYS.llmSettings);
+  return saved ? { ...DEFAULT_LLM_SETTINGS, ...saved } : DEFAULT_LLM_SETTINGS;
 }
 
 function buildExperts(defaults: Expert[], overrides: ExpertOverrides): Expert[] {
@@ -72,6 +101,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<ReviewProject[]>(loadInitialProjects);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [expertOverrides, setExpertOverrides] = useState<ExpertOverrides>(loadInitialExpertOverrides);
+  const [llmSettings, setLlmSettings] = useState<LlmSettings>(loadInitialLlmSettings);
 
   const experts = useMemo(
     () => buildExperts(DEFAULT_EXPERTS, expertOverrides),
@@ -85,6 +115,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.expertOverrides, expertOverrides);
   }, [expertOverrides]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.llmSettings, llmSettings);
+  }, [llmSettings]);
 
   const navigate = (route: string) => setActiveRoute(route);
 
@@ -130,14 +164,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await pushSkills(DEFAULT_EXPERTS, {});
   };
 
-  const importAppData = (data: { projects?: ReviewProject[]; expertOverrides?: ExpertOverrides }) => {
+  const importAppData = (data: {
+    projects?: ReviewProject[];
+    expertOverrides?: ExpertOverrides;
+    llmSettings?: LlmSettings;
+  }) => {
     if (data.projects) setProjects(data.projects);
     if (data.expertOverrides) setExpertOverrides(data.expertOverrides);
+    if (data.llmSettings) setLlmSettings({ ...DEFAULT_LLM_SETTINGS, ...data.llmSettings });
   };
 
   const exportAppData = () => ({
     projects,
     expertOverrides,
+    llmSettings,
   });
 
   return (
@@ -156,6 +196,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         resetExpert,
         resetAllExperts,
         syncAllSkills,
+        llmSettings,
+        setLlmSettings,
         importAppData,
         exportAppData,
       }}

@@ -3,6 +3,8 @@ import { AppProvider, useAppContext } from './AppContext';
 import { AppLayout } from './components/layout/AppLayout';
 import { Dashboard } from './pages/Dashboard';
 import { Wizard } from './pages/NewTest/Wizard';
+import { UserTestWizard } from './pages/UserTest/UserTestWizard';
+import { UserSimulationView } from './pages/UserTest/UserSimulationView';
 import { DiscussionRoom } from './pages/Discussion/DiscussionRoom';
 import { ReportView } from './pages/Report/ReportView';
 import { Settings } from './pages/Settings/Settings';
@@ -14,8 +16,13 @@ function AppContent() {
   switch (activeRoute) {
     case 'dashboard':
       return <Dashboard />;
+    case 'expert-test':
     case 'new-test':
       return <Wizard />;
+    case 'user-test':
+      return <UserTestWizard />;
+    case 'user-simulation':
+      return <UserSimulationView />;
     case 'discussion':
       return <DiscussionRoom />;
     case 'report':

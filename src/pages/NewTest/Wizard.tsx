@@ -1,13 +1,19 @@
 import React, { useState } from 'react';
 import { useAppContext } from '../../AppContext';
 import {
+  deriveProjectName,
+  isHttpUrl,
+  resolveTestMaterial,
+  wizardHasMaterialInput,
+} from '../../lib/testMaterial';
+import type { TestMaterial } from '../../types/material';
+import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CheckIcon,
   UploadIcon,
   LinkIcon,
   MonitorIcon,
-  UsersIcon,
   DocumentIcon,
   PrototypeIcon,
   ImageIcon,
@@ -19,44 +25,88 @@ import { Badge } from '../../components/ui/Badge';
 import { Input, Textarea, Select } from '../../components/ui/Input';
 import { ExpertAvatar } from '../../components/ui/ExpertAvatar';
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4;
 
 export function Wizard() {
   const { navigate, setProjects, setCurrentProjectId, experts } = useAppContext();
   const [step, setStep] = useState<Step>(1);
 
   const [formData, setFormData] = useState({
-    name: 'בדיקת תהליך תשלום חדש',
+    name: '',
     testType: 'live_site',
-    url: 'https://example.co.il/checkout',
-    domain: 'מסחר אלקטרוני',
-    goal: 'הפחתת אחוז נטישה בעגלת קניות',
-    stage: 'אתר חי',
-    targetAudience: 'לקוחות חוזרים, גילאי 18-45',
-    selectedExperts: ['ux_don_norman', 'simplicity_krug', 'marketing_cro'],
-    userTestingEnabled: true,
+    url: '',
+    domain: '',
+    goal: '',
+    stage: '',
+    targetAudience: '',
+    selectedExperts: ['ux_don_norman', 'simplicity_krug', 'marketing_cro'] as string[],
   });
+  const [materialError, setMaterialError] = useState<string | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [materialPreview, setMaterialPreview] = useState<TestMaterial | null>(null);
+  const [prepareError, setPrepareError] = useState<string | null>(null);
+  const [prepareStatus, setPrepareStatus] = useState<string | null>(null);
 
-  const handleNext = () => {
-    if (step < 4) setStep((s) => (s + 1) as Step);
-    else {
-      setStep(5);
+  const handleNext = async () => {
+    if (step === 1) {
+      if (!wizardHasMaterialInput(formData.url, uploadedFiles)) {
+        setMaterialError('יש להזין קישור (https://) או להעלות תמונה/סרטון — הניתוח מבוסס על החומר שהעליתם.');
+        return;
+      }
+      setMaterialError(null);
+    }
+
+    if (step < 3) {
+      setStep((s) => (s + 1) as Step);
+      return;
+    }
+
+    setStep(4);
+    setPrepareError(null);
+    setPrepareStatus('מכין חומרים לניתוח...');
+
+    try {
+      const material = await resolveTestMaterial(formData.testType, formData.url, uploadedFiles);
+      setMaterialPreview(material);
+      setPrepareStatus(
+        material.imageDataUrl
+          ? 'חומר ויזואלי נטען — המומחים ינתחו את התמונה/המסך'
+          : material.sourceUrl
+            ? 'מטא-דאטה מהקישור נאספה'
+            : 'הקשר טקסטואלי מוכן'
+      );
+
+      const displayUrl =
+        material.sourceUrl ?? (isHttpUrl(formData.url) ? formData.url : material.fileNames?.join(', '));
+
+      const projectName =
+        formData.name.trim() || deriveProjectName(material, formData.url);
+
+      const newProj = {
+        id: 'proj-' + Date.now(),
+        ...formData,
+        name: projectName,
+        url: displayUrl,
+        material,
+        reviewKind: 'expert' as const,
+        userTestingEnabled: false,
+        testType: formData.testType as 'live_site' | 'static_design' | 'prototype' | 'prd',
+        status: 'running' as const,
+        createdAt: new Date().toISOString(),
+      };
+
       setTimeout(() => {
-        const newProj = {
-          id: 'proj-' + Date.now(),
-          ...formData,
-          testType: formData.testType as 'live_site' | 'static_design' | 'prototype' | 'prd',
-          status: 'running' as const,
-          createdAt: new Date().toISOString(),
-        };
         setProjects((p) => [newProj, ...p]);
         setCurrentProjectId(newProj.id);
         navigate('discussion');
-      }, 3000);
+      }, 1500);
+    } catch (error) {
+      setPrepareError(error instanceof Error ? error.message : 'שגיאה בהכנת החומרים');
+      setPrepareStatus(null);
     }
   };
 
-  if (step === 5) {
+  if (step === 4) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6 animate-in fade-in zoom-in duration-500">
         <div className="relative">
@@ -66,8 +116,14 @@ export function Wizard() {
         <div className="text-center">
           <h2 className="text-2xl font-bold text-[var(--color-podium-text)]">הצוות מתכנס...</h2>
           <p className="text-[var(--color-podium-text-secondary)] mt-2 text-sm">
-            סורק חומרים, טוען פרסונות, ומחלק משימות ל-4 המומחים.
+            {prepareStatus ?? 'סורק חומרים, טוען פרסונות, ומחלק משימות למומחים.'}
           </p>
+          {prepareError && (
+            <p className="text-[var(--color-podium-danger)] text-sm font-semibold mt-2">{prepareError}</p>
+          )}
+          {materialPreview?.imageDataUrl && !prepareError && (
+            <p className="text-[var(--color-podium-success)] text-xs mt-1">תמונה/מסך יישלחו למודל הראייה</p>
+          )}
         </div>
       </div>
     );
@@ -77,15 +133,14 @@ export function Wizard() {
     { num: 1, label: 'חומרים' },
     { num: 2, label: 'הקשר עסקי' },
     { num: 3, label: 'צוות מומחים' },
-    { num: 4, label: 'בדיקת משתמשים' },
   ];
 
   return (
     <div className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-4rem)]">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-[var(--color-podium-text)]">יצירת חדר בדיקה חדש</h1>
+        <h1 className="text-2xl font-bold text-[var(--color-podium-text)]">בדיקת מומחים</h1>
         <p className="text-[var(--color-podium-text-secondary)] mt-1 text-sm">
-          הגדירו את מטרת הבדיקה והרכיבו את צוות המומחים המתאים ביותר.
+          הגדירו חומרים, הקשר עסקי, והרכיבו את צוות המומחים לדיון.
         </p>
 
         <div className="flex items-center gap-2 mt-8">
@@ -172,27 +227,45 @@ export function Wizard() {
                   <input
                     type="file"
                     multiple
+                    accept="image/*,video/*,.png,.jpg,.jpeg,.webp,.mp4,.webm"
                     className="hidden"
                     onChange={(e) => {
-                      if (e.target.files && e.target.files.length > 0) {
-                        const fileNames = Array.from(e.target.files as FileList)
-                          .map((f: File) => f.name)
-                          .join(', ');
-                        setFormData({ ...formData, url: fileNames });
+                      const files = e.target.files ? Array.from(e.target.files) : [];
+                      if (files.length > 0) {
+                        setUploadedFiles(files);
+                        setFormData({
+                          ...formData,
+                          url: files.map((f: File) => f.name).join(', '),
+                        });
                       }
                     }}
                   />
-                  <UploadIcon size={16} /> העלאת קבצים
+                  <UploadIcon size={16} /> העלאת תמונה / סרטון
                 </label>
               </div>
+              {uploadedFiles.length > 0 && (
+                <p className="text-xs text-[var(--color-podium-text-secondary)]">
+                  קבצים: {uploadedFiles.map((f) => f.name).join(', ')} — יועלו ויישלחו לניתוח ויזואלי (תמונה או פריים
+                  מסרטון).
+                </p>
+              )}
+              <p className="text-xs text-[var(--color-podium-text-tertiary)]">
+                הניתוח מבוסס על החומר שהעליתם — לא על תרחיש דמו. קישור נסרק בשרת; תמונה/וידאו נשלחים למודל הראייה.
+              </p>
+              {materialError && (
+                <p className="text-sm text-[var(--color-podium-danger)] font-semibold">{materialError}</p>
+              )}
             </Card>
 
             <div className="space-y-2">
-              <label className="block text-sm font-semibold text-[var(--color-podium-text)]">שם הבדיקה</label>
+              <label className="block text-sm font-semibold text-[var(--color-podium-text)]">
+                שם הבדיקה (אופציונלי — ייווצר אוטומטית מהחומר)
+              </label>
               <Input
                 type="text"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="למשל: בדיקת דף נחיתה"
               />
             </div>
           </div>
@@ -200,12 +273,16 @@ export function Wizard() {
 
         {step === 2 && (
           <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-            <h2 className="text-lg font-bold text-[var(--color-podium-text)]">הגדרת הקשר</h2>
+            <h2 className="text-lg font-bold text-[var(--color-podium-text)]">הקשר עסקי (אופציונלי)</h2>
+            <p className="text-sm text-[var(--color-podium-text-secondary)] -mt-4">
+              השדות כאן לא מחליפים את החומר שהעליתם — המומחים מנתחים את המוצר/מסך עצמו. מלאו רק אם רלוונטי.
+            </p>
 
             <Card className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <label className="block text-sm font-semibold text-[var(--color-podium-text)]">תחום המוצר</label>
                 <Select value={formData.domain} onChange={(e) => setFormData({ ...formData, domain: e.target.value })}>
+                  <option value="">— לא צוין —</option>
                   <option>מסחר אלקטרוני</option>
                   <option>ביטוח</option>
                   <option>בנקאות ופיננסים</option>
@@ -218,6 +295,7 @@ export function Wizard() {
               <div className="space-y-2">
                 <label className="block text-sm font-semibold text-[var(--color-podium-text)]">שלב חיי המוצר</label>
                 <Select value={formData.stage} onChange={(e) => setFormData({ ...formData, stage: e.target.value })}>
+                  <option value="">— לא צוין —</option>
                   <option>אתר חי</option>
                   <option>לפני השקה (Staging)</option>
                   <option>אפיון ראשוני</option>
@@ -304,43 +382,6 @@ export function Wizard() {
           </div>
         )}
 
-        {step === 4 && (
-          <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-            <h2 className="text-lg font-bold text-[var(--color-podium-text)]">סימולציית משתמשים אמיתיים (User Testing)</h2>
-
-            <Card padding="lg" className="text-center">
-              <UsersIcon className="text-[var(--color-podium-primary)]/30 mx-auto mb-4" size={56} />
-              <h3 className="text-lg font-bold text-[var(--color-podium-text)] mb-2">לבחון מול מודלים התנהגותיים</h3>
-              <p className="text-[var(--color-podium-text-secondary)] max-w-lg mx-auto mb-6 text-sm">
-                המערכת תיצר פרסונות מבוסס AI, ותריץ אותן דרך הממשק עם "הפרעות מציאותיות". המומחים ינתחו את תוצאות הסימולציה.
-              </p>
-
-              <label className="inline-flex items-center cursor-pointer bg-[var(--color-podium-surface-muted)] py-3 px-6 rounded-full border border-[var(--color-podium-border)]">
-                <input
-                  type="checkbox"
-                  checked={formData.userTestingEnabled}
-                  onChange={(e) => setFormData({ ...formData, userTestingEnabled: e.target.checked })}
-                  className="sr-only peer"
-                />
-                <div className="relative w-11 h-6 bg-[var(--color-podium-border)] peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-[var(--color-podium-primary)]/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--color-podium-primary)]" />
-                <span className="ms-4 text-sm font-bold text-[var(--color-podium-text)]">הפעל סימולציית משתמשים בעת הבדיקה</span>
-              </label>
-            </Card>
-
-            {formData.userTestingEnabled && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                <div className="bg-[var(--color-podium-warning-bg)] p-5 rounded-[var(--radius-podium-lg)] border border-amber-100">
-                  <h4 className="font-bold text-[var(--color-podium-warning)] mb-1 text-sm">פרסונה: משתמשת לחוצה בזמן</h4>
-                  <p className="text-sm text-amber-700">"אני מנסה לסיים את התשלום בתור לרופא, אין לי סבלנות לקרוא אותיות קטנות."</p>
-                </div>
-                <div className="bg-[var(--color-podium-info-bg)] p-5 rounded-[var(--radius-podium-lg)] border border-blue-100">
-                  <h4 className="font-bold text-[var(--color-podium-info)] mb-1 text-sm">פרסונה: משתמש חושש</h4>
-                  <p className="text-sm text-blue-700">"זו הפעם הראשונה שאני קונה פה. אם משהו קופץ לי או נראה חשוד אני עוזב."</p>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-[var(--color-podium-border)] p-4 md:px-8 shadow-[var(--shadow-podium-sm)]">
@@ -349,17 +390,21 @@ export function Wizard() {
             variant="ghost"
             onClick={() => (step > 1 ? setStep((s) => (s - 1) as Step) : navigate('dashboard'))}
             icon={<ChevronRightIcon size={16} />}
+            iconPosition="start"
           >
-            {step === 1 ? 'חזרה ללוח הבקרה' : 'הקודם'}
+            {step === 1 ? 'חזרה לעמוד הבית' : 'הקודם'}
           </Button>
 
           <Button
             onClick={handleNext}
-            disabled={step === 3 && formData.selectedExperts.length === 0}
-            variant={step === 4 ? 'success' : 'primary'}
-            icon={step !== 4 ? <ChevronLeftIcon size={16} /> : undefined}
+            disabled={
+              (step === 1 && !wizardHasMaterialInput(formData.url, uploadedFiles)) ||
+              (step === 3 && formData.selectedExperts.length === 0)
+            }
+            variant={step === 3 ? 'success' : 'primary'}
+            icon={step !== 3 ? <ChevronLeftIcon size={16} /> : undefined}
           >
-            {step === 4 ? 'הרץ בדיקת מומחים' : 'המשך'}
+            {step === 3 ? 'הרץ בדיקת מומחים' : 'המשך'}
           </Button>
         </div>
       </div>

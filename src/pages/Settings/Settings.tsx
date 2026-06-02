@@ -6,6 +6,8 @@ import {
 } from '../../AppContext';
 import { ExpertEditableFields } from '../../types';
 import { DEFAULT_EXPERTS } from '../../data/experts';
+import { LlmSettingsCard } from './LlmSettingsCard';
+import { DEFAULT_LLM_SETTINGS } from '../../lib/llmDefaults';
 import { getDefaultExpertAssetFields } from '../../lib/expertDefaults';
 import {
   compressAvatarImage,
@@ -321,6 +323,10 @@ export function Settings() {
             data.expertOverrides && typeof data.expertOverrides === 'object'
               ? data.expertOverrides
               : undefined,
+          llmSettings:
+            data.llmSettings && typeof data.llmSettings === 'object'
+              ? { ...DEFAULT_LLM_SETTINGS, ...data.llmSettings }
+              : undefined,
         });
         setImportMessage('הנתונים יובאו בהצלחה');
       } catch {
@@ -346,6 +352,8 @@ export function Settings() {
           עריכת מומחים, תמונות ו-Skills. כל שמירה מעדכנת את קבצי SKILL ב-`.cursor/skills/`.
         </p>
       </header>
+
+      <LlmSettingsCard />
 
       <Card padding="lg">
         <h2 className="font-bold text-[var(--color-podium-text)] mb-1">גיבוי, ייבוא וסנכרון Skills</h2>

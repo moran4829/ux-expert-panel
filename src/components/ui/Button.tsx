@@ -8,6 +8,8 @@ export type ButtonProps = React.ComponentPropsWithoutRef<'button'> & {
   variant?: ButtonVariant;
   size?: ButtonSize;
   icon?: React.ReactNode;
+  /** `end` (ברירת מחדל) = אייקון משמאל לטקסט ב-RTL. `start` = מימין לטקסט (למשל חזרה) */
+  iconPosition?: 'start' | 'end';
 };
 
 const variantStyles: Record<ButtonVariant, string> = {
@@ -33,10 +35,13 @@ export function Button({
   variant = 'primary',
   size = 'md',
   icon,
+  iconPosition = 'end',
   className,
   children,
   ...props
 }: ButtonProps) {
+  const iconEl = icon ? <span className="inline-flex shrink-0">{icon}</span> : null;
+
   return (
     <button
       className={cn(
@@ -47,8 +52,17 @@ export function Button({
       )}
       {...props}
     >
-      {icon}
-      {children}
+      {iconPosition === 'end' ? (
+        <>
+          <span>{children}</span>
+          {iconEl}
+        </>
+      ) : (
+        <>
+          {iconEl}
+          <span>{children}</span>
+        </>
+      )}
     </button>
   );
 }
