@@ -5,7 +5,7 @@ import { buildExpertSkillMarkdown, syncExpertSkillsToProject } from './lib/exper
 import { DEFAULT_FINDINGS, DEFAULT_REPORT_SCORES } from './data/defaultFindings';
 import { Expert, ExpertEditableFields, ExpertOverrides, ReviewProject } from './types';
 import { loadFromStorage, saveToStorage, STORAGE_KEYS } from './lib/storage';
-import { DEFAULT_LLM_SETTINGS } from './lib/llmDefaults';
+import { DEFAULT_LLM_SETTINGS, migrateLlmSettings } from './lib/llmDefaults';
 import { LlmSettings } from './types/llm';
 
 interface AppContextType {
@@ -85,7 +85,7 @@ function loadInitialExpertOverrides(): ExpertOverrides {
 
 function loadInitialLlmSettings(): LlmSettings {
   const saved = loadFromStorage<Partial<LlmSettings>>(STORAGE_KEYS.llmSettings);
-  return saved ? { ...DEFAULT_LLM_SETTINGS, ...saved } : DEFAULT_LLM_SETTINGS;
+  return saved ? migrateLlmSettings(saved) : DEFAULT_LLM_SETTINGS;
 }
 
 function buildExperts(defaults: Expert[], overrides: ExpertOverrides): Expert[] {
@@ -171,7 +171,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }) => {
     if (data.projects) setProjects(data.projects);
     if (data.expertOverrides) setExpertOverrides(data.expertOverrides);
-    if (data.llmSettings) setLlmSettings({ ...DEFAULT_LLM_SETTINGS, ...data.llmSettings });
+    if (data.llmSettings) setLlmSettings(migrateLlmSettings(data.llmSettings));
   };
 
   const exportAppData = () => ({

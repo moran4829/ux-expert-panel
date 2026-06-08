@@ -28,6 +28,9 @@ export function ReportView() {
   const overallScore = project.scores?.overall ?? 72;
   const executiveSummary =
     project.executiveSummary ?? buildExecutiveSummary(findings, experts, project);
+  const aggregated = project.aggregatedReport;
+  const expertReviews = project.expertReviews ?? [];
+  const screenSummary = project.screenExtraction?.screen_summary;
 
   const getSeverityVariant = (sev: string): 'danger' | 'warning' | 'info' | 'default' => {
     switch (sev) {
@@ -144,8 +147,104 @@ export function ReportView() {
               <p className="text-[var(--color-podium-text-secondary)] leading-relaxed text-sm">
                 {executiveSummary}
               </p>
+              {screenSummary && (
+                <p className="text-xs text-[var(--color-podium-text-tertiary)] mt-3 border-t border-[var(--color-podium-border)] pt-3">
+                  סיכום מסך (Vision): {screenSummary}
+                </p>
+              )}
             </Card>
           </div>
+
+          {aggregated && (
+            <div className="space-y-5">
+              <h3 className="font-bold text-[var(--color-podium-text)] text-lg">תוכנית פעולה מועדפת</h3>
+              <Card>
+                <p className="text-sm text-[var(--color-podium-text-secondary)] mb-4">{aggregated.main_summary}</p>
+                {aggregated.top_issues.length > 0 && (
+                  <div className="space-y-3 mb-4">
+                    <h4 className="text-sm font-bold text-[var(--color-podium-text)]">נושאים קריטיים</h4>
+                    {aggregated.top_issues.map((issue, i) => (
+                      <div
+                        key={i}
+                        className="p-3 rounded-[var(--radius-podium-md)] bg-[var(--color-podium-surface-muted)] border border-[var(--color-podium-border)]"
+                      >
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <Badge
+                            variant={
+                              issue.severity === 'high'
+                                ? 'danger'
+                                : issue.severity === 'medium'
+                                  ? 'warning'
+                                  : 'info'
+                            }
+                          >
+                            {issue.severity}
+                          </Badge>
+                          <span className="font-semibold text-sm text-[var(--color-podium-text)]">
+                            {issue.issue}
+                          </span>
+                        </div>
+                        <p className="text-sm text-[var(--color-podium-text-secondary)]">{issue.recommendation}</p>
+                        {issue.mentioned_by.length > 0 && (
+                          <p className="text-xs text-[var(--color-podium-text-tertiary)] mt-1">
+                            מומחים: {issue.mentioned_by.join(', ')}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {aggregated.priority_action_plan.length > 0 && (
+                  <ol className="space-y-2 list-decimal list-inside text-sm text-[var(--color-podium-text-secondary)]">
+                    {aggregated.priority_action_plan.map((action) => (
+                      <li key={action.priority}>
+                        <span className="font-semibold text-[var(--color-podium-text)]">{action.action}</span>
+                        {' — '}
+                        {action.expected_impact}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {aggregated.quick_wins.length > 0 && (
+                  <div className="mt-4">
+                    <h4 className="text-sm font-bold text-[var(--color-podium-success)] mb-2">Quick wins</h4>
+                    <ul className="text-sm text-[var(--color-podium-text-secondary)] space-y-1">
+                      {aggregated.quick_wins.map((w, i) => (
+                        <li key={i}>• {w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </Card>
+            </div>
+          )}
+
+          {expertReviews.length > 0 && (
+            <div className="space-y-4">
+              <h3 className="font-bold text-[var(--color-podium-text)] text-lg">כרטיסי מומחים (ניתוח מובנה)</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {expertReviews.map((review) => (
+                  <Card key={review.expert} padding="sm" className="p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="font-bold text-sm text-[var(--color-podium-text)]">{review.expert}</h4>
+                      <Badge variant="primary">{review.score}/100</Badge>
+                    </div>
+                    <p className="text-sm text-[var(--color-podium-text-secondary)] mb-3">{review.summary}</p>
+                    {review.findings.slice(0, 2).map((f, i) => (
+                      <p key={i} className="text-xs text-[var(--color-podium-text-tertiary)] mb-1">
+                        • {f.issue} ({f.severity})
+                      </p>
+                    ))}
+                    {review.open_questions.length > 0 && (
+                      <p className="text-xs text-[var(--color-podium-text-tertiary)] mt-2">
+                        שאלות פתוחות: {review.open_questions.join('; ')}
+                      </p>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
 
           <h3 className="font-bold text-[var(--color-podium-text)] text-lg">ציונים לפי קטגוריות</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

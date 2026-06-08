@@ -6,7 +6,7 @@
 
 ## הרצה מקומית
 
-**דרישות:** Node.js, (אופציונלי) [LM Studio](https://lmstudio.ai/) לדיון חי עם מודל מקומי
+**דרישות:** Node.js, (אופציונלי) [Ollama](https://ollama.com/) או [LM Studio](https://lmstudio.ai/) לניתוח מקומי
 
 1. התקנת תלויות:
    ```bash
@@ -18,55 +18,65 @@
    ```
    האפליקציה נפתחת בדרך כלל ב-`http://localhost:3000`
 
-3. **אופציונלי — LM Studio:** הפעילו Local Server (`http://localhost:1234/v1`), טענו מודל, ובחרו **LM Studio** בהגדרות האפליקציה. ניתן להגדיר ברירות מחדל בשרת דרך `.env` (העתיקו מ-[`.env.example`](.env.example)):
-   ```env
-   LM_STUDIO_BASE_URL=http://localhost:1234/v1
-   LM_STUDIO_MODEL=google/gemma-4-e4b
+3. **אופציונלי — Ollama (מומלץ ל-POC):**
+   ```bash
+   ollama pull qwen2.5vl:7b   # Vision — חילוץ JSON מהמסך
+   ollama pull qwen3:14b      # דיון מומחים + ניתוח מובנה
+   ollama pull qwen3:30b      # איגוד דוח (אופציונלי)
    ```
+   בהגדרות האפליקציה: **הגדרות → מנועי LLM מקומיים** — הקצו מודל לכל משימה.
 
-4. **בדיקה עם חומר (קישור/תמונה):** נדרש **LM Studio** — ברירת המחדל היא `lm_studio`. מצב **דמו** לא מנתח חומר שהועלה (רק לפרויקטים ללא קישור/קובץ).
+4. **אופציונלי — LM Studio:** הפעילו Local Server (`http://localhost:1234/v1`), טענו מודל ראייה/טקסט, והקצו בטבלת המשימות.
+
+5. **בדיקה עם חומר (קישור/תמונה):** נדרש LLM מקומי (לא מצב דמו). מצב **דמו** לא מנתח חומר שהועלה.
 
 > `@google/genai` ב-`package.json` שמור לעתיד (Gemini בענן) — **לא מחובר ל-UI** כרגע.
 
 ---
 
-## חיבור LLM מקומי (LM Studio)
+## מנוע LLM מקומי — Hybrid + Task Routing
 
-### רקע
+### זרימה
 
-לפני החיבור, חדר הדיון ([`src/pages/Discussion/DiscussionRoom.tsx`](src/pages/Discussion/DiscussionRoom.tsx)) השתמש רק בהודעות סטטיות מ-[`src/data/defaultDiscussion.ts`](src/data/defaultDiscussion.ts). נוספה אפשרות לבחור בין:
+1. **Vision** (`vision_extract`) — לפני הדיון: מודל ראייה מחלץ JSON אובייקטיבי מהצילום.
+2. **דיון שורה-שורה** (`discussion_turn`) — כל מומחה מדבר בתורו עם JSON + Skill + תמליל.
+3. **ניתוח מובנה** (`expert_reasoning`) — בעת הפקת דוח: JSON מובנה לכל מומחה.
+4. **איגוד דוח** (`report_aggregate`) — מיזוג ממצאים לתוכנית פעולה.
 
-| מצב | תיאור |
-|-----|--------|
-| **דמו** (`mock`) | הודעות מוכנות, מוצגות בטיימר (התנהגות מקורית) |
-| **LM Studio** (`lm_studio`) | כל מומחה שנבחר בבדיקה מייצר תובנה דרך מודל מקומי |
+| משימה | מודל POC מומלץ |
+|-------|----------------|
+| `vision_extract` | `qwen2.5vl:7b` |
+| `discussion_turn` | `qwen3:14b` |
+| `expert_reasoning` | `qwen3:14b` |
+| `report_aggregate` | `qwen3:30b` |
 
-הגדרות נשמרות ב-localStorage (`uxpert_llm_settings`) ונערכות ב-**הגדרות → מנוע דיון (LLM)**.
+הגדרות נשמרות ב-localStorage (`uxpert_llm_settings`) ב-**הגדרות → מנועי LLM מקומיים**.
 
 ### ארכיטקטורה
 
 ```mermaid
 flowchart LR
-  UI[DiscussionRoom] -->|POST /api/chat| Vite[Vite llmApiPlugin]
-  Vite -->|OpenAI-compatible| LM[LM Studio localhost:1234]
-  Settings[LlmSettingsCard] -->|localStorage| AppContext[AppContext llmSettings]
-  AppContext --> UI
-  ExpertSkill[buildExpertSkillMarkdown] -->|system prompt| UI
+  Upload[Image] --> Vision[vision_extract]
+  Vision --> JSON[screenExtraction]
+  JSON --> Discussion[discussion_turn]
+  Discussion --> Room[DiscussionRoom row by row]
+  Room --> Report[ReportView]
+  Settings[LlmSettingsCard] --> Router[llmRouter]
+  Router --> Vite[vite-llm-api]
+  Vite --> Ollama[Ollama]
+  Vite --> LM[LM Studio]
 ```
-
-1. הממשק קורא ל-`/api/chat` (רק ב-`npm run dev`).
-2. פלאגין Vite ([`vite-llm-api.ts`](vite-llm-api.ts)) מעביר ל-LM Studio בפורמט OpenAI (`/v1/chat/completions`).
-3. לכל מומחה: **system prompt** = תוכן ה-Skill ([`buildExpertSkillMarkdown`](src/lib/expertSkill.ts)) + הקשר הבדיקה + תמליל קודם.
 
 ### קבצים מרכזיים
 
-- [`vite-llm-api.ts`](vite-llm-api.ts) — Proxy: `POST /api/chat`, `GET /api/llm/health`
-- [`src/lib/llm.ts`](src/lib/llm.ts) — בניית prompt, קריאת API, פרסור תגים `[OBSERVATION]` / `[CONFLICT]` / `[RECOMMENDATION]`
-- [`src/lib/llmDefaults.ts`](src/lib/llmDefaults.ts) — ברירות מחדל: `lm_studio`, URL, מודל `google/gemma-4-e4b`
-- [`src/types/llm.ts`](src/types/llm.ts) — `LlmProvider`, `LlmSettings`
-- [`src/pages/Settings/LlmSettingsCard.tsx`](src/pages/Settings/LlmSettingsCard.tsx) — בחירת ספק + בדיקת חיבור
-- [`src/pages/Discussion/DiscussionRoom.tsx`](src/pages/Discussion/DiscussionRoom.tsx) — לולאת דיון (דמו / LM Studio)
-- [`src/AppContext.tsx`](src/AppContext.tsx) + [`src/lib/storage.ts`](src/lib/storage.ts) — state ושמירה
+- [`vite-llm-api.ts`](vite-llm-api.ts) — `POST /api/chat`, `GET /api/llm/models`, `GET /api/llm/health`, `POST /api/llm/pull`
+- [`src/lib/llmRouter.ts`](src/lib/llmRouter.ts) — ניתוב מודל לפי משימה
+- [`src/lib/reviewEngine/visionExtract.ts`](src/lib/reviewEngine/visionExtract.ts) — חילוץ JSON מהמסך
+- [`src/lib/reviewEngine/expertReasoning.ts`](src/lib/reviewEngine/expertReasoning.ts) — ניתוח מומחה מובנה
+- [`src/lib/reviewEngine/aggregateReport.ts`](src/lib/reviewEngine/aggregateReport.ts) — איגוד דוח
+- [`src/lib/llm.ts`](src/lib/llm.ts) — prompts לדיון + תגים `[OBSERVATION]` / `[CONFLICT]` / `[RECOMMENDATION]`
+- [`src/pages/Settings/LlmSettingsCard.tsx`](src/pages/Settings/LlmSettingsCard.tsx) — הקצאת מודל לכל משימה
+- [`src/pages/Discussion/DiscussionRoom.tsx`](src/pages/Discussion/DiscussionRoom.tsx) — Vision pre-flight + דיון
 
 ### חומרי בדיקה (קישור / תמונה / סרטון)
 
@@ -78,20 +88,22 @@ flowchart LR
 
 > **מקור האמת לניתוח:** רק החומר שהועלה (תמונה/קישור/פריים מסרטון). שדות תחום/מטרה בוויזארד הם אופציונליים. מצב **דמו** חסום כשיש חומר — לא יוצג תרחיש checkout לדוגמה.
 
-### זרימת דיון ב-LM Studio
+### זרימת דיון
 
-1. בהגדרות: בוחרים **LM Studio** (אפשר **בדיקת חיבור**).
-2. בוויזארד בדיקה חדשה: בוחרים מומחים → נכנסים לחדר דיון.
-3. כל `selectedExperts` מדבר **בתורו** — קריאה אחת ל-API למומחה.
-4. המודל מחזיר טקסט בעברית; שורה ראשונה עם תג סוג ההודעה.
-5. ההודעות נשמרות ב-`project.messages` (localStorage דרך `AppContext`).
+1. בהגדרות: הקצו מודלים לכל משימה (Vision, דיון, ניתוח, איגוד).
+2. בוויזארד: העלו צילום מסך → בחרו מומחים → חדר דיון.
+3. Vision רץ אוטומטית לפני הדיון (אם הוגדר מודל).
+4. כל מומחה מדבר **בתורו** — מודל `discussion_turn`.
+5. בהפקת דוח: `expert_reasoning` + `report_aggregate` (אם לא מצב דמו).
 
 ### API (פיתוח)
 
 | Endpoint | שיטה | תפקיד |
 |----------|------|--------|
-| `/api/chat` | POST | שליחת `messages` ל-LM Studio (`baseUrl`, `model` מהגדרות UI) |
-| `/api/llm/health` | GET | בדיקה ש-`http://localhost:1234/v1/models` זמין |
+| `/api/chat` | POST | צ'אט ל-Ollama או LM Studio (`provider`, `baseUrl`, `model`) |
+| `/api/llm/models` | GET | רשימת מודלים מותקנים |
+| `/api/llm/health` | GET | בדיקת חיבור לספק |
+| `/api/llm/pull` | POST | `ollama pull` למודל מומלץ |
 
 ### פתרון: "Empty response from LM Studio"
 
@@ -109,9 +121,8 @@ flowchart LR
 
 ### מגבליות
 
-- **דוח סופי** (`findings`, `scores`) עדיין מ-[`src/data/defaultFindings.ts`](src/data/defaultFindings.ts) — לא נוצר אוטומטית מה-LLM.
 - **Gemini / ענן** — לא מחובר ל-UI (שמור לעתיד).
-- **`npm run build`** — אין middleware של Vite; לפרודקשן נדרש שרת proxy נפרד ל-LM Studio (אם רוצים LLM גם שם).
+- **`npm run build`** — אין middleware של Vite; לפרודקשן נדרש שרת proxy נפרד ל-Ollama/LM Studio.
 - סנכרון Skills ל-`.cursor/skills/` דורש גם כן `npm run dev` (פלאגין נפרד: [`vite-skills-api.ts`](vite-skills-api.ts)).
 
 ---

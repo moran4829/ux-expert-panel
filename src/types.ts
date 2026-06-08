@@ -1,4 +1,5 @@
 import type { TestMaterial } from './types/material';
+import type { AggregatedReport, ExpertReviewResult, ScreenExtraction } from './types/reviewEngine';
 
 export type { TestMaterial, MaterialKind } from './types/material';
 
@@ -53,6 +54,10 @@ export interface ReviewProject {
   url?: string;
   /** Parsed/uploaded material for vision + context (not just the url string) */
   material?: TestMaterial;
+  /** JSON אובייקטיבי מחילוץ Vision לפני הדיון */
+  screenExtraction?: ScreenExtraction;
+  expertReviews?: ExpertReviewResult[];
+  aggregatedReport?: AggregatedReport;
   selectedExperts: string[];
   /** רלוונטי לבדיקות משתמשים / כשהופעל במפורש בבדיקת מומחים (legacy) */
   userTestingEnabled: boolean;

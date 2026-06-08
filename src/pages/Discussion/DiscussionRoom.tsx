@@ -7,8 +7,12 @@ import {
 } from '../../lib/reportFromDiscussion';
 import { DEFAULT_DISCUSSION_MESSAGES } from '../../data/defaultDiscussion';
 import { fetchExpertDiscussionMessage } from '../../lib/llm';
+import { isLocalLlmActive } from '../../lib/llmDefaults';
+import { aggregateExpertReviews } from '../../lib/reviewEngine/aggregateReport';
+import { runAllExpertReasoning } from '../../lib/reviewEngine/expertReasoning';
+import { runVisionExtractionForProject } from '../../lib/reviewEngine/visionExtract';
 import { hasAnalyzableMaterial } from '../../lib/testMaterial';
-import { DiscussionMessage } from '../../types';
+import { DiscussionMessage, ReviewProject } from '../../types';
 import {
   PlayIcon,
   PauseIcon,
@@ -24,6 +28,8 @@ import { Badge } from '../../components/ui/Badge';
 import { ExpertAvatar } from '../../components/ui/ExpertAvatar';
 import { Input } from '../../components/ui/Input';
 
+type VisionPhase = 'idle' | 'running' | 'done' | 'skipped' | 'failed';
+
 export function DiscussionRoom() {
   const {
     currentProjectId,
@@ -36,15 +42,16 @@ export function DiscussionRoom() {
   } = useAppContext();
   const project = projects.find((p) => p.id === currentProjectId);
 
-  const useLmStudio = llmSettings.provider === 'lm_studio';
+  const useLocalLlm = isLocalLlmActive(llmSettings);
+  const discussionModel = llmSettings.taskModels.discussion_turn;
   const requiresRealAnalysis = project ? hasAnalyzableMaterial(project) : false;
   const canPlayMockDemo = !requiresRealAnalysis;
-  const analysisBlocked = requiresRealAnalysis && !useLmStudio;
+  const analysisBlocked = requiresRealAnalysis && !useLocalLlm;
   const expertTurnOrder = useMemo(
     () => project?.selectedExperts ?? [],
     [project?.selectedExperts]
   );
-  const totalTurns = useLmStudio || requiresRealAnalysis
+  const totalTurns = useLocalLlm || requiresRealAnalysis
     ? expertTurnOrder.length
     : DEFAULT_DISCUSSION_MESSAGES.length;
 
@@ -54,25 +61,37 @@ export function DiscussionRoom() {
 
   const [messages, setMessages] = useState<DiscussionMessage[]>(savedMessages);
   const [isPlaying, setIsPlaying] = useState(
-    !hasSavedDiscussion && !isCompleted && !(requiresRealAnalysis && !useLmStudio)
+    !hasSavedDiscussion && !isCompleted && !(requiresRealAnalysis && !useLocalLlm)
   );
   const [currentIndex, setCurrentIndex] = useState(savedMessages.length);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [visionPhase, setVisionPhase] = useState<VisionPhase>(
+    project?.screenExtraction ? 'done' : 'idle'
+  );
+  const [visionWarning, setVisionWarning] = useState<string | null>(null);
+  const [generatingReport, setGeneratingReport] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const llmRunId = useRef(0);
   const messagesRef = useRef(messages);
+  const visionRunId = useRef(0);
+  const projectRef = useRef(project);
 
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
   useEffect(() => {
+    projectRef.current = project;
+  }, [project]);
+
+  useEffect(() => {
     if (!project) return;
     setMessages(project.messages ?? []);
     setCurrentIndex(project.messages?.length ?? 0);
-    const blocked = hasAnalyzableMaterial(project) && llmSettings.provider !== 'lm_studio';
+    setVisionPhase(project.screenExtraction ? 'done' : 'idle');
+    const blocked = hasAnalyzableMaterial(project) && !isLocalLlmActive(llmSettings);
     setIsPlaying(!project.messages?.length && project.status !== 'completed' && !blocked);
-  }, [project?.id, llmSettings.provider]);
+  }, [project?.id, llmSettings]);
 
   useEffect(() => {
     if (!project || messages.length === 0) return;
@@ -80,7 +99,64 @@ export function DiscussionRoom() {
   }, [messages, project?.id]);
 
   useEffect(() => {
-    if (useLmStudio || !canPlayMockDemo || !isPlaying || isCompleted || !project) return;
+    if (!useLocalLlm || !project || isCompleted) return;
+    if (project.screenExtraction) {
+      setVisionPhase('done');
+      return;
+    }
+    if (!project.material?.imageDataUrl) {
+      setVisionPhase('skipped');
+      return;
+    }
+    if (llmSettings.taskModels.vision_extract.provider === 'mock') {
+      setVisionPhase('skipped');
+      return;
+    }
+
+    const runId = ++visionRunId.current;
+    setVisionPhase('running');
+    setVisionWarning(null);
+
+    runVisionExtractionForProject(project, llmSettings)
+      .then((extraction) => {
+        if (visionRunId.current !== runId || !extraction) return;
+        updateProject(project.id, { screenExtraction: extraction });
+        setVisionPhase('done');
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `${project.id}-vision-${Date.now()}`,
+            expertId: 'system',
+            type: 'status',
+            text: `חילוץ Vision הושלם — ${extraction.screen_summary || 'נתוני מסך נשמרו'}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+      })
+      .catch((error) => {
+        if (visionRunId.current !== runId) return;
+        const msg = error instanceof Error ? error.message : 'שגיאה בחילוץ Vision';
+        setVisionPhase('failed');
+        setVisionWarning(msg);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `${project.id}-vision-err-${Date.now()}`,
+            expertId: 'system',
+            type: 'status',
+            text: `חילוץ Vision נכשל — הדיון ימשיך עם תמונה ישירה. (${msg})`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+      });
+
+    return () => {
+      visionRunId.current += 1;
+    };
+  }, [project?.id, useLocalLlm, isCompleted]);
+
+  useEffect(() => {
+    if (useLocalLlm || !canPlayMockDemo || !isPlaying || isCompleted || !project) return;
     if (currentIndex >= DEFAULT_DISCUSSION_MESSAGES.length) {
       if (isPlaying) setIsPlaying(false);
       return;
@@ -102,10 +178,11 @@ export function DiscussionRoom() {
     );
 
     return () => clearTimeout(timer);
-  }, [currentIndex, isPlaying, isCompleted, project?.id, useLmStudio, canPlayMockDemo]);
+  }, [currentIndex, isPlaying, isCompleted, project?.id, useLocalLlm, canPlayMockDemo]);
 
   useEffect(() => {
-    if (!useLmStudio || !isPlaying || isCompleted || !project) return;
+    if (!useLocalLlm || !isPlaying || isCompleted || !project) return;
+    if (visionPhase === 'running') return;
     if (currentIndex >= expertTurnOrder.length) {
       setIsPlaying(false);
       return;
@@ -123,18 +200,23 @@ export function DiscussionRoom() {
     const run = async () => {
       setIsGenerating(true);
 
+      const liveProject = projectRef.current;
+      if (!liveProject) return;
+
       let prior = messagesRef.current;
       if (currentIndex === 0 && prior.length === 0) {
         const intro: DiscussionMessage = {
-          id: `${project.id}-intro-${Date.now()}`,
+          id: `${liveProject.id}-intro-${Date.now()}`,
           expertId: 'system',
           type: 'status',
-          text: `מתחבר ל-LM Studio (${llmSettings.lmStudioModel})${
-            project.material?.imageDataUrl
-              ? ' — מנתח תמונה/מסך שהועלה'
-              : project.material?.sourceUrl
-                ? ` — חומר מקישור: ${project.material.sourceUrl}`
-                : ''
+          text: `מתחבר ל-${discussionModel.provider} (${discussionModel.modelId})${
+            liveProject.screenExtraction
+              ? ' — מנתח לפי JSON מחולץ'
+              : liveProject.material?.imageDataUrl
+                ? ' — מנתח תמונה/מסך'
+                : liveProject.material?.sourceUrl
+                  ? ` — חומר מקישור: ${liveProject.material.sourceUrl}`
+                  : ''
           }...`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
@@ -146,7 +228,7 @@ export function DiscussionRoom() {
       try {
         const { text, type } = await fetchExpertDiscussionMessage(
           expert,
-          project,
+          liveProject,
           prior,
           expertOverrides,
           experts,
@@ -156,7 +238,7 @@ export function DiscussionRoom() {
         if (llmRunId.current !== runId) return;
 
         const nextMessage: DiscussionMessage = {
-          id: `${project.id}-${expertId}-${Date.now()}`,
+          id: `${liveProject.id}-${expertId}-${Date.now()}`,
           expertId,
           text,
           type,
@@ -168,14 +250,14 @@ export function DiscussionRoom() {
         setCurrentIndex((c) => c + 1);
       } catch (error) {
         if (llmRunId.current !== runId) return;
-        const message = error instanceof Error ? error.message : 'שגיאה ב-LM Studio';
+        const message = error instanceof Error ? error.message : 'שגיאת LLM';
         setMessages((prev) => [
           ...prev,
           {
-            id: `${project.id}-error-${Date.now()}`,
+            id: `${liveProject.id}-error-${Date.now()}`,
             expertId: 'system',
             type: 'status',
-            text: `שגיאה: ${message}. ודאו ש-LM Studio רץ ושהמודל ${llmSettings.lmStudioModel} פעיל.`,
+            text: `שגיאה: ${message}. בדקו הגדרות LLM ומודל למשימת "דיון מומחים".`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
         ]);
@@ -195,9 +277,12 @@ export function DiscussionRoom() {
     isPlaying,
     isCompleted,
     project?.id,
-    useLmStudio,
+    useLocalLlm,
     expertTurnOrder,
     llmSettings,
+    visionPhase,
+    discussionModel.modelId,
+    discussionModel.provider,
   ]);
 
   useEffect(() => {
@@ -206,21 +291,60 @@ export function DiscussionRoom() {
     }
   }, [messages, isGenerating]);
 
-  const handleGenerateReport = () => {
+  const buildProductContext = (p: ReviewProject) =>
+    [p.goal, p.targetAudience, p.domain, p.stage].filter(Boolean).join(' | ');
+
+  const handleGenerateReport = async () => {
     if (!project) return;
+    setGeneratingReport(true);
 
-    const findings = buildFindingsFromDiscussion(messages, project);
-    const scores = buildScoresFromFindings(findings, project.selectedExperts);
+    try {
+      let expertReviews = project.expertReviews;
+      let aggregatedReport = project.aggregatedReport;
 
-    updateProject(project.id, {
-      status: 'completed',
-      completedAt: new Date().toISOString(),
-      messages,
-      findings,
-      scores,
-      executiveSummary: buildExecutiveSummary(findings, experts, project),
-    });
-    navigate('report');
+      const selectedExpertObjs = project.selectedExperts
+        .map((id) => experts.find((e) => e.id === id))
+        .filter(Boolean) as typeof experts;
+
+      if (project.screenExtraction && selectedExpertObjs.length) {
+        if (llmSettings.taskModels.expert_reasoning.provider !== 'mock') {
+          expertReviews = await runAllExpertReasoning(
+            selectedExpertObjs,
+            project.screenExtraction,
+            buildProductContext(project),
+            llmSettings
+          );
+        }
+        if (expertReviews?.length && llmSettings.taskModels.report_aggregate.provider !== 'mock') {
+          aggregatedReport =
+            (await aggregateExpertReviews(expertReviews, llmSettings)) ?? undefined;
+        }
+      }
+
+      const findings = buildFindingsFromDiscussion(messages, project);
+      const scores = aggregatedReport
+        ? {
+            ...buildScoresFromFindings(findings, project.selectedExperts),
+            overall: aggregatedReport.overall_score,
+          }
+        : buildScoresFromFindings(findings, project.selectedExperts);
+
+      updateProject(project.id, {
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+        messages,
+        findings,
+        scores,
+        expertReviews,
+        aggregatedReport,
+        executiveSummary:
+          aggregatedReport?.main_summary ??
+          buildExecutiveSummary(findings, experts, project),
+      });
+      navigate('report');
+    } finally {
+      setGeneratingReport(false);
+    }
   };
 
   if (!project) return <div>Project not found</div>;
@@ -230,7 +354,15 @@ export function DiscussionRoom() {
     .filter(Boolean);
 
   const discussionComplete = currentIndex >= totalTurns;
-  const showLoading = isPlaying && (isGenerating || (useLmStudio && messages.length > 0));
+  const showLoading =
+    isPlaying && (isGenerating || visionPhase === 'running' || (useLocalLlm && messages.length > 0));
+
+  const providerLabel =
+    discussionModel.provider === 'ollama'
+      ? 'Ollama'
+      : discussionModel.provider === 'lm_studio'
+        ? 'LM Studio'
+        : 'דמו';
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] max-h-screen">
@@ -245,13 +377,15 @@ export function DiscussionRoom() {
           <div>
             <h1 className="text-xl font-bold text-[var(--color-podium-text)] flex items-center gap-3 flex-wrap">
               {project.name}
-              <Badge variant={useLmStudio ? 'primary' : analysisBlocked ? 'warning' : 'default'}>
-                {useLmStudio
-                  ? 'LM Studio'
-                  : analysisBlocked
-                    ? 'נדרש LM Studio'
-                    : 'דמו (ללא חומר)'}
+              <Badge variant={useLocalLlm ? 'primary' : analysisBlocked ? 'warning' : 'default'}>
+                {useLocalLlm ? providerLabel : analysisBlocked ? 'נדרש LLM מקומי' : 'דמו (ללא חומר)'}
               </Badge>
+              {visionPhase === 'running' && (
+                <Badge variant="info">מנתח מסך (Vision)...</Badge>
+              )}
+              {project.screenExtraction && (
+                <Badge variant="success">JSON מחולץ</Badge>
+              )}
               {isPlaying && (
                 <span className="text-xs font-semibold text-[var(--color-podium-primary)] bg-[var(--color-podium-primary-light)] px-2.5 py-1 rounded-full flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-podium-primary)] animate-pulse" />
@@ -261,8 +395,8 @@ export function DiscussionRoom() {
             </h1>
             <p className="text-[var(--color-podium-text-secondary)] text-sm mt-0.5">
               {project.material?.sourceUrl || project.url || 'ניתוח מבוסס חומר שהועלה'}
-              {useLmStudio
-                ? ` • ${llmSettings.lmStudioModel}`
+              {useLocalLlm
+                ? ` • דיון: ${discussionModel.modelId}`
                 : analysisBlocked
                   ? ' • מצב דמו לא מנתח את המוצר שהעליתם'
                   : ' • דמו ללא חומר בלבד'}
@@ -290,10 +424,10 @@ export function DiscussionRoom() {
               variant="secondary"
               size="sm"
               onClick={() => setIsPlaying(!isPlaying)}
-              disabled={isGenerating || analysisBlocked}
+              disabled={isGenerating || analysisBlocked || visionPhase === 'running'}
               title={
                 analysisBlocked
-                  ? 'הפעילו LM Studio בהגדרות'
+                  ? 'הגדירו LLM מקומי בהגדרות'
                   : isPlaying
                     ? 'השהה ניתוח'
                     : 'המשך ניתוח'
@@ -304,10 +438,10 @@ export function DiscussionRoom() {
           )}
           <Button
             onClick={handleGenerateReport}
-            disabled={(!discussionComplete && !isCompleted) || isGenerating}
+            disabled={(!discussionComplete && !isCompleted) || isGenerating || generatingReport}
             icon={<ListChecksIcon size={16} />}
           >
-            {isCompleted ? 'צפייה בדוח' : 'הפקת דוח סופי'}
+            {generatingReport ? 'מפיק דוח...' : isCompleted ? 'צפייה בדוח' : 'הפקת דוח סופי'}
           </Button>
         </div>
       </header>
@@ -318,12 +452,17 @@ export function DiscussionRoom() {
             הועלה חומר אמיתי (קישור/תמונה) — מצב דמו לא מנתח אותו.
           </p>
           <p className="text-sm text-amber-800 mb-3">
-            הפעילו LM Studio בהגדרות ובחרו מודל ראייה (למשל google/gemma-4-e4b), ואז לחצו המשך ניתוח.
-            המומחים יתייחסו רק למה שבחומר — לא לתרחיש עגלת קניות לדוגמה.
+            הגדירו Ollama או LM Studio בהגדרות, והקצו מודל למשימת &quot;דיון מומחים שורה-שורה&quot;.
           </p>
           <Button size="sm" onClick={() => navigate('settings')}>
             מעבר להגדרות LLM
           </Button>
+        </Card>
+      )}
+
+      {visionWarning && (
+        <Card className="mb-4 border-amber-200 bg-[var(--color-podium-warning-bg)]">
+          <p className="text-sm text-amber-800">{visionWarning}</p>
         </Card>
       )}
 
@@ -375,17 +514,6 @@ export function DiscussionRoom() {
                     )}
                     {msg.text}
                   </div>
-
-                  {msg.type === 'conflict' && (
-                    <div className="mt-3 flex items-center gap-2">
-                      <button className="text-xs font-bold text-[var(--color-podium-primary)] bg-[var(--color-podium-primary-light)] hover:bg-[var(--color-podium-primary-muted)] px-3 py-1.5 rounded-[var(--radius-podium-md)] transition-colors">
-                        👈 לקבל המלצה זו
-                      </button>
-                      <button className="text-xs font-bold text-[var(--color-podium-text-secondary)] bg-[var(--color-podium-surface-muted)] hover:bg-[var(--color-podium-border)] border border-[var(--color-podium-border)] px-3 py-1.5 rounded-[var(--radius-podium-md)] transition-colors">
-                        בקש מהמומחים להגיע לעמק השווה
-                      </button>
-                    </div>
-                  )}
                 </div>
               </div>
             );
@@ -411,10 +539,10 @@ export function DiscussionRoom() {
               className="cursor-not-allowed opacity-70 pr-10"
               placeholder={
                 analysisBlocked
-                  ? 'הפעילו LM Studio בהגדרות כדי לנתח את החומר שהעליתם.'
-                  : useLmStudio
-                    ? 'המערכת מנתחת את החומר שהעליתם דרך LM Studio. ניתן להשהות ולהמשיך.'
-                    : 'מצב דמו — רק לפרויקטים ללא חומר. העלו קישור/תמונה בוויזארד לניתוח אמיתי.'
+                  ? 'הגדירו LLM מקומי בהגדרות כדי לנתח את החומר שהעליתם.'
+                  : useLocalLlm
+                    ? 'המערכת מנתחת את החומר דרך מודלים מקומיים לפי משימה. ניתן להשהות ולהמשיך.'
+                    : 'מצב דמו — רק לפרויקטים ללא חומר.'
               }
             />
           </div>
