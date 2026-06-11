@@ -56,3 +56,292 @@ body {
   color: var(--color-podium-text);
   -webkit-font-smoothing: antialiased;
 }
+
+/* Login page — landscape scene */
+@keyframes login-sun-drift {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(18px, -8px) scale(1.04);
+  }
+}
+
+@keyframes login-sun-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes login-sky-shift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes login-wave-slide {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes login-tree-sway {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(1.2deg);
+  }
+}
+
+@keyframes login-bird-float {
+  0%,
+  100% {
+    transform: translate(0, 0) scaleX(1);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translate(12px, -3px) scaleX(1);
+    opacity: 0.55;
+  }
+  45% {
+    transform: translate(12px, -5px) scaleX(0.92);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translate(13px, -3px) scaleX(1);
+    opacity: 0.55;
+  }
+  55% {
+    transform: translate(13px, -5px) scaleX(0.92);
+    opacity: 0.5;
+  }
+}
+
+@keyframes login-shimmer {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.login-scene {
+  background: linear-gradient(180deg, #e8f4fc 0%, #fdf2f7 38%, #fff8f0 72%, #dff0f8 100%);
+}
+
+.login-sky {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    120deg,
+    rgba(255, 220, 180, 0.45) 0%,
+    rgba(255, 240, 230, 0.3) 35%,
+    rgba(200, 230, 255, 0.35) 70%,
+    rgba(228, 37, 125, 0.06) 100%
+  );
+  background-size: 200% 200%;
+  animation: login-sky-shift 24s ease-in-out infinite;
+}
+
+.login-sun {
+  position: absolute;
+  top: 8%;
+  left: 14%;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff8dc, #ffd27a 55%, #ffb347 100%);
+  box-shadow: 0 0 40px rgba(255, 190, 80, 0.45);
+  animation: login-sun-drift 16s ease-in-out infinite;
+}
+
+.login-sun-glow {
+  position: absolute;
+  top: 5%;
+  left: 11%;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 210, 100, 0.35) 0%, transparent 70%);
+  animation: login-sun-glow 8s ease-in-out infinite;
+}
+
+.login-hills {
+  position: absolute;
+  bottom: 18%;
+  left: 0;
+  width: 100%;
+  height: 42%;
+  min-height: 180px;
+}
+
+.login-hill-back {
+  fill: rgba(120, 170, 130, 0.28);
+}
+
+.login-hill-mid {
+  fill: rgba(95, 155, 110, 0.38);
+}
+
+.login-hill-front {
+  fill: rgba(80, 140, 95, 0.48);
+}
+
+.login-trees {
+  position: absolute;
+  bottom: 22%;
+  left: 0;
+  right: 0;
+  height: 140px;
+  pointer-events: none;
+}
+
+.login-tree {
+  position: absolute;
+  bottom: 0;
+  width: 90px;
+  height: auto;
+  transform-origin: bottom center;
+}
+
+.login-tree-1 {
+  left: 8%;
+  animation: login-tree-sway 7s ease-in-out infinite;
+}
+
+.login-tree-2 {
+  right: 12%;
+  width: 76px;
+  animation: login-tree-sway 8.5s ease-in-out infinite 0.8s;
+}
+
+.login-tree-3 {
+  left: 42%;
+  width: 64px;
+  opacity: 0.85;
+  animation: login-tree-sway 9s ease-in-out infinite 1.4s;
+}
+
+.login-sea {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 22%;
+  min-height: 100px;
+  background: linear-gradient(180deg, #7ec8e8 0%, #5aadcf 45%, #4a9bc0 100%);
+  overflow: hidden;
+}
+
+.login-wave {
+  position: absolute;
+  left: 0;
+  width: 200%;
+  height: 100%;
+  opacity: 0.35;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    rgba(255, 255, 255, 0.12) 40px,
+    transparent 80px
+  );
+}
+
+.login-wave-1 {
+  top: 8%;
+  animation: login-wave-slide 22s linear infinite;
+}
+
+.login-wave-2 {
+  top: 28%;
+  opacity: 0.22;
+  animation: login-wave-slide 30s linear infinite reverse;
+}
+
+.login-wave-3 {
+  top: 48%;
+  opacity: 0.15;
+  animation: login-wave-slide 18s linear infinite;
+}
+
+.login-birds {
+  position: absolute;
+  inset: 0;
+}
+
+.login-bird {
+  position: absolute;
+  width: 28px;
+  height: auto;
+}
+
+.login-bird-1 {
+  top: 18%;
+  right: 22%;
+  animation: login-bird-float 11s ease-in-out infinite;
+}
+
+.login-bird-2 {
+  top: 24%;
+  right: 34%;
+  width: 22px;
+  animation: login-bird-float 13s ease-in-out infinite 1.5s;
+}
+
+.login-bird-3 {
+  top: 14%;
+  right: 46%;
+  width: 20px;
+  animation: login-bird-float 15s ease-in-out infinite 3s;
+}
+
+.login-scene-shimmer {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 60% 40% at 50% 20%, rgba(255, 255, 255, 0.35), transparent 60%);
+  animation: login-shimmer 10s ease-in-out infinite;
+}
+
+.login-scene-frost {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(10px) saturate(1.05);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+}
+
+.login-scene .login-sun,
+.login-scene .login-sun-glow,
+.login-scene .login-hills,
+.login-scene .login-trees,
+.login-scene .login-sea,
+.login-scene .login-birds {
+  opacity: 0.72;
+}
+
+.login-scene-shimmer {
+  opacity: 0.5;
+}
+
+.login-card {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(12px);
+}

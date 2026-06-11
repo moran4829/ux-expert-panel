@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAppContext } from '../../AppContext';
 import {
   deriveProjectName,
@@ -25,14 +25,18 @@ import { cn } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
-import { Input, Textarea, Select } from '../../components/ui/Input';
+import { WizardBusinessFields } from '../../components/WizardFieldSelects';
+import { Input } from '../../components/ui/Input';
 import { ExpertAvatar } from '../../components/ui/ExpertAvatar';
 
 type Step = 1 | 2 | 3 | 4;
 
 export function Wizard() {
-  const { navigate, setProjects, setCurrentProjectId, experts } = useAppContext();
+  const { navigate, setProjects, setCurrentProjectId, experts, wizardTemplate, clearWizardTemplate, wizardFieldOptions } =
+    useAppContext();
   const [step, setStep] = useState<Step>(1);
+  const appliedTemplate = useRef(false);
+  const [duplicatedFrom, setDuplicatedFrom] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -50,6 +54,26 @@ export function Wizard() {
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
   const [prepareStatus, setPrepareStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!wizardTemplate || wizardTemplate.reviewKind !== 'expert' || appliedTemplate.current) return;
+    appliedTemplate.current = true;
+    setFormData({
+      name: wizardTemplate.name,
+      testType: wizardTemplate.testType,
+      url: wizardTemplate.url,
+      domain: wizardTemplate.domain,
+      goal: wizardTemplate.goal,
+      stage: wizardTemplate.stage,
+      targetAudience: wizardTemplate.targetAudience,
+      selectedExperts:
+        wizardTemplate.selectedExperts.length > 0
+          ? wizardTemplate.selectedExperts
+          : ['ux_don_norman', 'simplicity_krug', 'marketing_cro'],
+    });
+    setDuplicatedFrom(wizardTemplate.sourceProjectName ?? null);
+    clearWizardTemplate();
+  }, [wizardTemplate, clearWizardTemplate]);
 
   const handleNext = async () => {
     if (step === 1) {
@@ -151,6 +175,13 @@ export function Wizard() {
 
   return (
     <div className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-4rem)]">
+      {duplicatedFrom && (
+        <Card className="mb-4 border-[var(--color-podium-primary-muted)] bg-[var(--color-podium-primary-light)]">
+          <p className="text-sm text-[var(--color-podium-primary)] font-semibold">
+            הגדרות הועתקו מ&quot;{duplicatedFrom}&quot; — עדכנו תמונה/קישור והריצו בדיקה חדשה.
+          </p>
+        </Card>
+      )}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-[var(--color-podium-text)]">בדיקת מומחים</h1>
         <p className="text-[var(--color-podium-text-secondary)] mt-1 text-sm">
@@ -303,49 +334,15 @@ export function Wizard() {
             </p>
 
             <Card className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div className="space-y-2">
-                <label className="block text-sm font-semibold text-[var(--color-podium-text)]">תחום המוצר</label>
-                <Select value={formData.domain} onChange={(e) => setFormData({ ...formData, domain: e.target.value })}>
-                  <option value="">— לא צוין —</option>
-                  <option>מסחר אלקטרוני</option>
-                  <option>ביטוח</option>
-                  <option>בנקאות ופיננסים</option>
-                  <option>הלת'-טק</option>
-                  <option>ממשל ושלטון מקומי</option>
-                  <option>מערכת פנימית למוקדנים</option>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-sm font-semibold text-[var(--color-podium-text)]">שלב חיי המוצר</label>
-                <Select value={formData.stage} onChange={(e) => setFormData({ ...formData, stage: e.target.value })}>
-                  <option value="">— לא צוין —</option>
-                  <option>אתר חי</option>
-                  <option>לפני השקה (Staging)</option>
-                  <option>אפיון ראשוני</option>
-                  <option>שלב עיצוב</option>
-                </Select>
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <label className="block text-sm font-semibold text-[var(--color-podium-text)]">מטרת הבדיקה</label>
-                <Textarea
-                  value={formData.goal}
-                  onChange={(e) => setFormData({ ...formData, goal: e.target.value })}
-                  className="min-h-[100px]"
-                  placeholder="מה אנחנו מנסים למצוא בבדיקה הזו?"
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <label className="block text-sm font-semibold text-[var(--color-podium-text)]">קהל יעד (מי המשתמשים?)</label>
-                <Textarea
-                  value={formData.targetAudience}
-                  onChange={(e) => setFormData({ ...formData, targetAudience: e.target.value })}
-                  className="min-h-[80px]"
-                  placeholder="גיל, רקע, אוריינות דיגיטלית..."
-                />
-              </div>
+              <WizardBusinessFields
+                options={wizardFieldOptions}
+                domain={formData.domain}
+                stage={formData.stage}
+                targetAudience={formData.targetAudience}
+                goal={formData.goal}
+                onGoalChange={(goal) => setFormData({ ...formData, goal })}
+                onChange={(fields) => setFormData({ ...formData, ...fields })}
+              />
             </Card>
           </div>
         )}

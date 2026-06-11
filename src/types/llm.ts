@@ -1,4 +1,6 @@
-export type LlmProvider = 'mock' | 'ollama' | 'lm_studio';
+export type LlmProvider = 'mock' | 'ollama' | 'lm_studio' | 'gemini';
+
+export type UserLlmMode = 'gemini' | 'ollama' | 'lm_studio';
 
 export type LlmTask =
   | 'vision_extract'
@@ -18,6 +20,14 @@ export interface LlmSettings {
   ollamaBaseUrl: string;
   lmStudioBaseUrl: string;
   taskModels: Record<LlmTask, LocalModelConfig>;
+  /** משתמשים שאינם admin — מפתח Gemini אישי (נשמר ב-Firestore של המשתמש) */
+  geminiApiKey?: string;
+  /** איזה סוג חיבור המשתמש בחר */
+  userLlmMode?: UserLlmMode;
+  /** true אחרי השלמת הגדרת LLM בכניסה */
+  llmConfigured?: boolean;
+  /** true למשתמשים שמשתמשים במפתח/שרת משלהם (לא במפתח השרת של האדמין) */
+  usesOwnLlmCredentials?: boolean;
 }
 
 export interface InstalledModel {

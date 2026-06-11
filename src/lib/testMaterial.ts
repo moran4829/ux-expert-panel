@@ -27,7 +27,20 @@ export async function persistMaterialImage(
   projectId: string,
   fileName: string,
   dataUrl: string
-): Promise<{ imageUrl: string; byteSize: number }> {
+): Promise<{ imageUrl?: string; imageDataUrl?: string; byteSize: number }> {
+  const { getActiveFirebaseUid } = await import('./authUid');
+
+  const base64 = dataUrl.split(',')[1] ?? '';
+  const byteSize = Math.ceil((base64.length * 3) / 4);
+
+  // Cloud mode (Firestore) — inline compressed image, no Firebase Storage (requires paid Blaze)
+  if (getActiveFirebaseUid()) {
+    if (byteSize > 900_000) {
+      throw new Error('התמונה גדולה מדי לשמירה בענן (~900KB). נסו תמונה קטנה יותר.');
+    }
+    return { imageDataUrl: dataUrl, byteSize };
+  }
+
   const response = await fetch('/api/material/upload', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -130,15 +143,17 @@ async function storeVisualMaterial(
   fileNames: string[]
 ): Promise<TestMaterial> {
   const stored = await persistMaterialImage(projectId, fileName, imageDataUrl);
+  const storedLabel = stored.imageUrl ? 'בשרת' : 'בענן';
   return {
     kind,
     imageUrl: stored.imageUrl,
+    imageDataUrl: stored.imageDataUrl,
     storedByteSize: stored.byteSize,
     fileNames,
     pageSummary:
       kind === 'video'
-        ? `סרטון שהועלה: ${fileNames.join(', ')}. התמונה נשמרה בשרת — הניתוח מבוסס על פריים מייצג.`
-        : `תמונת עיצוב/מסך שהועלתה: ${fileNames.join(', ')}. התמונה נשמרה בשרת — המומחים רואים אותה בניתוח.`,
+        ? `סרטון שהועלה: ${fileNames.join(', ')}. התמונה נשמרה ${storedLabel} — הניתוח מבוסס על פריים מייצג.`
+        : `תמונת עיצוב/מסך שהועלתה: ${fileNames.join(', ')}. התמונה נשמרה ${storedLabel} — המומחים רואים אותה בניתוח.`,
   };
 }
 

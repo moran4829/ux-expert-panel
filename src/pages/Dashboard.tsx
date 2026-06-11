@@ -1,35 +1,90 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useAppContext } from '../AppContext';
-import { PlayIcon, TrendingUpIcon, CheckCircleIcon, AlertTriangleIcon, ArrowLeftIcon, DashboardIcon } from '../components/icons';
+import { computeDashboardStats, sortProjectsByRecency } from '../lib/dashboardStats';
+import { ProjectList } from '../components/ProjectList';
+import { PlayIcon, TrendingUpIcon, CheckCircleIcon, AlertTriangleIcon, DashboardIcon } from '../components/icons';
 import { Button } from '../components/ui/Button';
-import { Card, CardHeader } from '../components/ui/Card';
-import { Badge } from '../components/ui/Badge';
-import { StatusBadge } from '../components/ui/StatusBadge';
-import { ExpertAvatar } from '../components/ui/ExpertAvatar';
-import { formatProjectCompletedLabel } from '../lib/formatDate';
+import { Card } from '../components/ui/Card';
+
+function buildSubtitle(stats: ReturnType<typeof computeDashboardStats>): string {
+  const parts: string[] = [];
+
+  if (stats.completedThisWeek > 0) {
+    parts.push(
+      stats.completedThisWeek === 1
+        ? 'יש לכם בדיקה אחת שהסתיימה השבוע'
+        : `יש לכם ${stats.completedThisWeek} בדיקות שהסתיימו השבוע`
+    );
+  } else if (stats.completedCount > 0) {
+    parts.push('עדיין לא הושלמו בדיקות השבוע');
+  } else {
+    parts.push('עדיין אין בדיקות שהושלמו במערכת');
+  }
+
+  if (stats.pendingFindingsCount > 0) {
+    parts.push(
+      stats.pendingFindingsCount === 1
+        ? 'ועוד הערה אחת ממתינה להתייחסות'
+        : `ועוד ${stats.pendingFindingsCount} הערות ממתינות להתייחסות`
+    );
+  }
+
+  return parts.join(' ');
+}
 
 export function Dashboard() {
-  const { projects, navigate, setCurrentProjectId, experts } = useAppContext();
+  const { projects, navigate, setCurrentProjectId, experts, duplicateProject, deleteProject } = useAppContext();
 
-  const handleOpenReport = (id: string) => {
-    setCurrentProjectId(id);
-    navigate('report');
+  const statsData = useMemo(() => computeDashboardStats(projects, experts), [projects, experts]);
+  const recentProjects = useMemo(() => sortProjectsByRecency(projects).slice(0, 5), [projects]);
+
+  const openProject = (projectId: string, route: 'discussion' | 'report' | 'user-simulation') => {
+    setCurrentProjectId(projectId);
+    navigate(route);
   };
+
+  const completedTrendDiff = statsData.completedThisWeek - statsData.completedLastWeek;
+  const completedTrend =
+    completedTrendDiff > 0
+      ? `+${completedTrendDiff} מול שבוע שעבר`
+      : completedTrendDiff < 0
+        ? `${completedTrendDiff} מול שבוע שעבר`
+        : statsData.completedCount > 0
+          ? 'אין שינוי משבוע שעבר'
+          : 'התחילו בדיקה ראשונה';
+
+  const criticalTrend =
+    statsData.criticalFindingsCount > 0
+      ? statsData.highOrCriticalProjectsCount === 1
+        ? 'בפרויקט אחד'
+        : `ב-${statsData.highOrCriticalProjectsCount} פרויקטים`
+      : 'אין ממצאים קריטיים';
+
+  const usabilityTrend =
+    statsData.usabilityTrendDelta === null
+      ? statsData.avgUsability === null
+        ? 'אין עדיין ציוני שימושיות'
+        : 'מבוסס על בדיקות שהושלמו'
+      : statsData.usabilityTrendDelta > 0
+        ? `עלייה של ${statsData.usabilityTrendDelta} נקודות מהממוצע הקודם`
+        : statsData.usabilityTrendDelta < 0
+          ? `ירידה של ${Math.abs(statsData.usabilityTrendDelta)} נקודות מהממוצע הקודם`
+          : 'יציב ביחס לבדיקות קודמות';
 
   const stats = [
     {
       title: 'בדיקות שהושלמו',
-      value: '12',
-      trend: '+3 מול שבוע שעבר',
-      trendUp: true,
+      value: String(statsData.completedCount),
+      trend: completedTrend,
+      trendUp: completedTrendDiff > 0,
       icon: CheckCircleIcon,
       iconBg: 'bg-[var(--color-podium-success-bg)]',
       iconColor: 'text-[var(--color-podium-success)]',
     },
     {
       title: 'ממצאים קריטיים',
-      value: '4',
-      trend: 'ממתינים לטיפול ב-2 פרויקטים',
+      value: String(statsData.criticalFindingsCount),
+      trend: criticalTrend,
       trendUp: false,
       icon: AlertTriangleIcon,
       iconBg: 'bg-[var(--color-podium-danger-bg)]',
@@ -37,9 +92,10 @@ export function Dashboard() {
     },
     {
       title: 'ציון שימושיות ממוצע',
-      value: '78',
-      suffix: '/100',
-      trend: 'עלייה של 4 נקודות מהרבעון הקודם',
+      value: statsData.avgUsability === null ? '—' : String(statsData.avgUsability),
+      suffix: statsData.avgUsability === null ? undefined : '/100',
+      trend: usabilityTrend,
+      trendUp: (statsData.usabilityTrendDelta ?? 0) > 0,
       icon: DashboardIcon,
       iconBg: 'bg-[var(--color-podium-info-bg)]',
       iconColor: 'text-[var(--color-podium-info)]',
@@ -51,9 +107,7 @@ export function Dashboard() {
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-podium-text)] tracking-tight">שלום, צוות מוצר 👋</h1>
-          <p className="text-[var(--color-podium-text-secondary)] mt-1 text-sm">
-            יש לכם בדיקה אחת שהסתיימה השבוע ועוד 14 הערות ממתינות להתייחסות.
-          </p>
+          <p className="text-[var(--color-podium-text-secondary)] mt-1 text-sm">{buildSubtitle(statsData)}</p>
         </div>
         <Button
           onClick={() => navigate('expert-test')}
@@ -81,7 +135,15 @@ export function Dashboard() {
               {stat.value}
               {stat.suffix && <span className="text-lg text-[var(--color-podium-text-tertiary)]">{stat.suffix}</span>}
             </p>
-            <p className={`text-xs font-medium flex items-center gap-1 ${stat.trendUp ? 'text-[var(--color-podium-success)]' : stat.title.includes('קריטיים') ? 'text-[var(--color-podium-danger)]' : 'text-[var(--color-podium-text-secondary)]'}`}>
+            <p
+              className={`text-xs font-medium flex items-center gap-1 ${
+                stat.trendUp
+                  ? 'text-[var(--color-podium-success)]'
+                  : stat.title.includes('קריטיים')
+                    ? 'text-[var(--color-podium-danger)]'
+                    : 'text-[var(--color-podium-text-secondary)]'
+              }`}
+            >
               {stat.trendUp && <TrendingUpIcon size={14} />}
               {stat.trend}
             </p>
@@ -89,8 +151,8 @@ export function Dashboard() {
         ))}
       </div>
 
-      <Card padding="none" className="overflow-hidden">
-        <CardHeader>
+      <section>
+        <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-bold text-[var(--color-podium-text)]">בדיקות אחרונות</h2>
           <button
             onClick={() => navigate('reports')}
@@ -98,60 +160,18 @@ export function Dashboard() {
           >
             צפייה בכל הבדיקות
           </button>
-        </CardHeader>
-        <div className="divide-y divide-[var(--color-podium-border)]">
-          {projects.map((project) => (
-            <div
-              key={project.id}
-              className="p-5 flex flex-col md:flex-row items-center justify-between hover:bg-[var(--color-podium-surface-muted)] transition-colors group cursor-pointer"
-              onClick={() => handleOpenReport(project.id)}
-            >
-              <div className="flex-1 min-w-0 mb-4 md:mb-0">
-                <div className="flex items-center gap-3 mb-1">
-                  <h3 className="text-base font-bold text-[var(--color-podium-text)] truncate">{project.name}</h3>
-                  <Badge>{project.domain}</Badge>
-                </div>
-                <p className="text-sm text-[var(--color-podium-text-secondary)] truncate mt-1">
-                  מטרה: {project.goal}
-                </p>
-                <div className="flex items-center gap-2 mt-3">
-                  <div className="flex -space-x-2 space-x-reverse">
-                    {project.selectedExperts.map((expertId, i) => {
-                      const expert = experts.find((e) => e.id === expertId);
-                      if (!expert) return null;
-                      return (
-                        <ExpertAvatar
-                          key={expert.id}
-                          expert={expert}
-                          size={28}
-                          className="border-2 border-white relative"
-                          style={{ zIndex: 10 - i }}
-                        />
-                      );
-                    })}
-                  </div>
-                  <span className="text-xs text-[var(--color-podium-text-tertiary)] mr-2">
-                    צוות של {project.selectedExperts.length} מומחים
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-5">
-                <div className="hidden md:flex flex-col items-end gap-1">
-                  <span className="text-sm font-medium text-[var(--color-podium-text-secondary)]">
-                    {formatProjectCompletedLabel(project)}
-                  </span>
-                  <StatusBadge status="success" label="הדוח מוכן" />
-                </div>
-
-                <button className="flex items-center justify-center w-9 h-9 rounded-full bg-[var(--color-podium-surface-muted)] text-[var(--color-podium-text-secondary)] group-hover:bg-[var(--color-podium-primary-light)] group-hover:text-[var(--color-podium-primary)] transition-colors border border-[var(--color-podium-border)]">
-                  <ArrowLeftIcon size={16} />
-                </button>
-              </div>
-            </div>
-          ))}
         </div>
-      </Card>
+
+        <ProjectList
+          projects={recentProjects}
+          experts={experts}
+          onOpen={openProject}
+          onDuplicate={duplicateProject}
+          onDelete={deleteProject}
+          emptyLabel="אין בדיקות עדיין"
+          emptyCta={{ label: 'התחלת בדיקת מומחים', route: 'expert-test' }}
+        />
+      </section>
     </div>
   );
 }

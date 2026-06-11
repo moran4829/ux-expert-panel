@@ -12,12 +12,13 @@ export type ChatMessage = {
 };
 
 export type ChatRequestBody = {
-  provider?: LlmApiProvider;
+  provider?: LlmApiProvider | 'gemini';
   baseUrl?: string;
   model?: string;
   messages: ChatMessage[];
   maxTokens?: number;
   temperature?: number;
+  apiKey?: string;
 };
 
 type LmChoice = {
@@ -267,6 +268,65 @@ async function proxyChat(body: ChatRequestBody) {
   return { content: result.content, model, provider };
 }
 
+async function proxyGeminiChat(body: ChatRequestBody) {
+  const apiKey = body.apiKey?.trim() || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('חסר מפתח Gemini API');
+  }
+
+  const model = body.model?.startsWith('gemini') ? body.model : 'gemini-2.0-flash';
+  const parts: { text?: string; inlineData?: { mimeType: string; data: string } }[] = [];
+
+  for (const msg of body.messages) {
+    if (msg.role === 'system') {
+      if (typeof msg.content === 'string' && msg.content.trim()) {
+        parts.push({ text: `[System]\n${msg.content}` });
+      }
+      continue;
+    }
+    if (typeof msg.content === 'string') {
+      parts.push({ text: msg.content });
+    } else {
+      for (const part of msg.content) {
+        if (part.type === 'text') parts.push({ text: part.text });
+        if (part.type === 'image_url' && part.image_url.url.startsWith('data:')) {
+          const [meta, data] = part.image_url.url.split(',');
+          const mimeType = meta.split(':')[1]?.split(';')[0] ?? 'image/png';
+          parts.push({ inlineData: { mimeType, data } });
+        }
+      }
+    }
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts }],
+        generationConfig: {
+          maxOutputTokens: body.maxTokens ?? 1024,
+          temperature: body.temperature ?? 0.55,
+        },
+      }),
+    }
+  );
+
+  const data = (await response.json()) as {
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    error?: { message?: string };
+  };
+
+  if (!response.ok) {
+    throw new Error(data.error?.message ?? `Gemini HTTP ${response.status}`);
+  }
+
+  const content = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('').trim() ?? '';
+  if (!content) throw new Error('תשובה ריקה מ-Gemini');
+  return { content, model, provider: 'gemini' as const };
+}
+
 export function llmApiPlugin(): Plugin {
   return {
     name: 'llm-api',
@@ -364,16 +424,25 @@ export function llmApiPlugin(): Plugin {
             return;
           }
 
-          const result = await proxyChat(chatBody);
+          const result =
+            chatBody.provider === 'gemini'
+              ? await proxyGeminiChat(chatBody)
+              : await proxyChat(chatBody);
           sendJson(res, 200, { ok: true, ...result });
         } catch (error) {
           const provider = chatBody?.provider ?? 'lm_studio';
           const baseUrl =
             chatBody?.baseUrl ??
             (provider === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234/v1');
+          const message =
+            provider === 'gemini'
+              ? error instanceof Error
+                ? error.message
+                : 'שגיאת Gemini'
+              : formatFetchError(error, provider, baseUrl);
           sendJson(res, 500, {
             ok: false,
-            message: formatFetchError(error, provider, baseUrl),
+            message,
           });
         }
       });

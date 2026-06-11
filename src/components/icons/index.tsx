@@ -18,6 +18,7 @@ import importSvg from '../../assets/icons/vuesax/linear/import.svg?raw';
 import infoCircleSvg from '../../assets/icons/vuesax/linear/info-circle.svg?raw';
 import linkSvg from '../../assets/icons/vuesax/linear/link.svg?raw';
 import locationSvg from '../../assets/icons/vuesax/linear/location.svg?raw';
+import logoutSvg from '../../assets/icons/vuesax/linear/logout.svg?raw';
 import magicpenSvg from '../../assets/icons/vuesax/linear/magicpen.svg?raw';
 import messageTextSvg from '../../assets/icons/vuesax/linear/message-text.svg?raw';
 import pauseSvg from '../../assets/icons/vuesax/linear/pause.svg?raw';
@@ -26,6 +27,8 @@ import playSvg from '../../assets/icons/vuesax/linear/play.svg?raw';
 import screenmirroringSvg from '../../assets/icons/vuesax/linear/screenmirroring.svg?raw';
 import tickCircleSvg from '../../assets/icons/vuesax/linear/tick-circle.svg?raw';
 import tickSquareSvg from '../../assets/icons/vuesax/linear/tick-square.svg?raw';
+import trashSvg from '../../assets/icons/vuesax/linear/trash.svg?raw';
+import userEditSvg from '../../assets/icons/vuesax/linear/user-edit.svg?raw';
 import userSvg from '../../assets/icons/vuesax/linear/user.svg?raw';
 
 function createIcon(svg: string, displayName: string) {
@@ -61,5 +64,9 @@ export const TargetIcon = createIcon(locationSvg, 'TargetIcon');
 export const DocumentIcon = createIcon(documentSvg, 'DocumentIcon');
 export const PrototypeIcon = createIcon(magicpenSvg, 'PrototypeIcon');
 export const ImageIcon = createIcon(gallerySvg, 'ImageIcon');
+export const TrashIcon = createIcon(trashSvg, 'TrashIcon');
+export const DuplicateIcon = createIcon(documentSvg, 'DuplicateIcon');
+export const EditProfileIcon = createIcon(userEditSvg, 'EditProfileIcon');
+export const LogoutIcon = createIcon(logoutSvg, 'LogoutIcon');
 
 export type { IconProps } from './Icon';

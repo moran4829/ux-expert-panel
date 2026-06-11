@@ -20,6 +20,7 @@ type ChatRequestBody = {
   messages: ChatMessage[];
   maxTokens?: number;
   temperature?: number;
+  apiKey?: string;
 };
 
 // ממיר מבנה OpenAI-style ל-Gemini
@@ -93,9 +94,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ ok: false, message: 'Missing messages' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = body.apiKey?.trim() || process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ ok: false, message: 'GEMINI_API_KEY לא מוגדר ב-Vercel' });
+    return res.status(401).json({
+      ok: false,
+      message: body.apiKey
+        ? 'מפתח Gemini לא תקין'
+        : 'חסר מפתח Gemini — הגדירו מפתח API אישי או פנו לאדמין',
+    });
   }
 
   try {

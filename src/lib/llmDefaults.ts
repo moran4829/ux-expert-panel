@@ -32,7 +32,7 @@ export const DEFAULT_TASK_MODELS: Record<LlmTask, LocalModelConfig> = {
   discussion_turn: LM_STUDIO_TEXT,
   expert_reasoning: LM_STUDIO_TEXT,
   report_aggregate: LM_STUDIO_TEXT,
-  user_simulation: LM_STUDIO_TEXT,
+  user_simulation: { provider: 'gemini', baseUrl: '', modelId: 'gemini-2.0-flash', supportsVision: true },
 };
 
 export const DEFAULT_LLM_SETTINGS: LlmSettings = {
@@ -90,6 +90,10 @@ export function migrateLlmSettings(saved: Partial<LlmSettings> & LegacyLlmSettin
     ollamaBaseUrl: saved.ollamaBaseUrl ?? DEFAULT_OLLAMA_BASE_URL,
     lmStudioBaseUrl: saved.lmStudioBaseUrl ?? DEFAULT_LM_STUDIO_BASE_URL,
     taskModels: { ...DEFAULT_TASK_MODELS },
+    geminiApiKey: saved.geminiApiKey,
+    userLlmMode: saved.userLlmMode,
+    llmConfigured: saved.llmConfigured,
+    usesOwnLlmCredentials: saved.usesOwnLlmCredentials,
   };
 
   if (saved.taskModels) {

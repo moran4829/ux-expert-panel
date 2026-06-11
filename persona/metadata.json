@@ -1,0 +1,7 @@
+{
+  "name": "UX-Vibe Expert Analyzer",
+  "description": "A professional AI-powered tool for UX/UI analysis focusing on specific user personas and rapid prototype evaluation.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

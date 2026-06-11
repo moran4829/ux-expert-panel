@@ -1,9 +1,27 @@
 import type { TestMaterial } from './types/material';
 import type { AggregatedReport, ExpertReviewResult, ScreenExtraction } from './types/reviewEngine';
+import type {
+  FlowScreen,
+  PersonaRun,
+  SimulationStatus,
+  UserPersona,
+} from './types/userSimulation';
+
+export type {
+  FlowScreen,
+  PersonaQuestion,
+  PersonaRun,
+  PersonaRunStatus,
+  PersonaWizardStep,
+  Prioritization,
+  SavedPersona,
+  SimulationStatus,
+  SolutionItem,
+  UserPersona,
+  UXMethodologyResult,
+} from './types/userSimulation';
 
 export type { TestMaterial, MaterialKind } from './types/material';
-
-export type TestType = 'live_site' | 'static_design' | 'flow' | 'video' | 'prototype' | 'prd' | 'comparison' | 'retest';
 
 export interface Expert {
   id: string;
@@ -33,11 +51,7 @@ export interface DiscussionMessage {
   timestamp: string;
 }
 
-export interface UserPersona {
-  id: string;
-  title: string;
-  description: string;
-}
+export type TestType = 'live_site' | 'static_design' | 'flow' | 'video' | 'prototype' | 'prd' | 'comparison' | 'retest';
 
 export type ReviewKind = 'expert' | 'user';
 
@@ -61,15 +75,34 @@ export interface ReviewProject {
   selectedExperts: string[];
   /** רלוונטי לבדיקות משתמשים / כשהופעל במפורש בבדיקת מומחים (legacy) */
   userTestingEnabled: boolean;
+  /** @deprecated legacy — use personaRuns */
   personas?: UserPersona[];
+  userTasks?: string[];
+  flowScreens?: FlowScreen[];
+  personaRuns?: PersonaRun[];
+  simulationStatus?: SimulationStatus;
   status: 'draft' | 'running' | 'completed';
   createdAt: string;
   /** מתי הבדיקה הסתיימה (דוח / סימולציה) */
   completedAt?: string;
   scores?: Record<string, number>;
+  /** הסבר לכל ציון — למה התקבל הציון */
+  scoreExplanations?: ScoreExplanation[];
   messages?: DiscussionMessage[];
+  /** הודעות צ'אט בין המשתמש למומחים לאחר סיום הדיון */
+  userChatMessages?: DiscussionMessage[];
   findings?: Finding[];
   executiveSummary?: string;
+}
+
+export type ScoreCategory = 'overall' | 'clarity' | 'usability' | 'trust' | 'accessibility';
+
+export interface ScoreExplanation {
+  key: ScoreCategory;
+  label: string;
+  score: number;
+  explanation: string;
+  factors: string[];
 }
 
 export interface Finding {
@@ -83,4 +116,6 @@ export interface Finding {
   effort: string;
   recommendation: string;
   status: 'new' | 'accepted' | 'rejected';
+  /** מקור הממצא — דיון ראשוני או צ'אט עם המשתמש */
+  findingSource?: 'panel' | 'user_chat';
 }

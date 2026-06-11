@@ -7,7 +7,11 @@ import {
 import { ExpertEditableFields } from '../../types';
 import { DEFAULT_EXPERTS } from '../../data/experts';
 import { LlmSettingsCard } from './LlmSettingsCard';
+import { UserLlmSetupForm } from '../../components/settings/UserLlmSetupForm';
+import { useAuth } from '../../context/AuthContext';
+import { WizardOptionsCard } from './WizardOptionsCard';
 import { DEFAULT_LLM_SETTINGS } from '../../lib/llmDefaults';
+import { normalizeWizardFieldOptions } from '../../data/wizardOptions';
 import { getDefaultExpertAssetFields } from '../../lib/expertDefaults';
 import {
   compressAvatarImage,
@@ -291,6 +295,7 @@ function ExpertEditorCard({
 }
 
 export function Settings() {
+  const { isAdmin } = useAuth();
   const {
     experts,
     expertOverrides,
@@ -327,6 +332,11 @@ export function Settings() {
             data.llmSettings && typeof data.llmSettings === 'object'
               ? { ...DEFAULT_LLM_SETTINGS, ...data.llmSettings }
               : undefined,
+          wizardFieldOptions:
+            data.wizardFieldOptions && typeof data.wizardFieldOptions === 'object'
+              ? normalizeWizardFieldOptions(data.wizardFieldOptions)
+              : undefined,
+          personaLibrary: Array.isArray(data.personaLibrary) ? data.personaLibrary : undefined,
         });
         setImportMessage('הנתונים יובאו בהצלחה');
       } catch {
@@ -353,7 +363,9 @@ export function Settings() {
         </p>
       </header>
 
-      <LlmSettingsCard />
+      {isAdmin ? <LlmSettingsCard /> : <UserLlmSetupForm compact />}
+
+      <WizardOptionsCard />
 
       <Card padding="lg">
         <h2 className="font-bold text-[var(--color-podium-text)] mb-1">גיבוי, ייבוא וסנכרון Skills</h2>

@@ -1,33 +1,33 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAppContext } from '../../AppContext';
 import {
-  buildExecutiveSummary,
   buildFindingsFromDiscussion,
+  buildFindingsFromExpertReviews,
+  buildScoreExplanations,
   buildScoresFromFindings,
+  resolveExecutiveSummary,
 } from '../../lib/reportFromDiscussion';
 import { DEFAULT_DISCUSSION_MESSAGES } from '../../data/defaultDiscussion';
 import { fetchExpertDiscussionMessage } from '../../lib/llm';
+import { fetchUserChatExpertResponses, mergePanelAndChatFindings } from '../../lib/userExpertChat';
 import { isLocalLlmActive } from '../../lib/llmDefaults';
 import { aggregateExpertReviews } from '../../lib/reviewEngine/aggregateReport';
 import { runAllExpertReasoning } from '../../lib/reviewEngine/expertReasoning';
 import { runVisionExtractionForProject } from '../../lib/reviewEngine/visionExtract';
-import { hasAnalyzableMaterial, materialHasStoredImage } from '../../lib/testMaterial';
-import { MaterialPreview } from '../../components/MaterialPreview';
+import { hasAnalyzableMaterial, materialHasStoredImage, getMaterialPreviewUrl } from '../../lib/testMaterial';
+import { DiscussionFocusPanels } from '../../components/DiscussionFocusPanels';
 import { DiscussionMessage, ReviewProject } from '../../types';
 import {
   PlayIcon,
   PauseIcon,
   ChevronRightIcon,
   MessageIcon,
-  AlertCircleIcon,
   ListChecksIcon,
 } from '../../components/icons';
-import { cn } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { ExpertAvatar } from '../../components/ui/ExpertAvatar';
-import { Input } from '../../components/ui/Input';
 
 type VisionPhase = 'idle' | 'running' | 'done' | 'skipped' | 'failed';
 
@@ -102,6 +102,12 @@ export function DiscussionRoom() {
   );
   const [visionWarning, setVisionWarning] = useState<string | null>(null);
   const [generatingReport, setGeneratingReport] = useState(false);
+  const [isChatMode, setIsChatMode] = useState((project?.userChatMessages?.length ?? 0) > 0);
+  const [chatMessages, setChatMessages] = useState<DiscussionMessage[]>(project?.userChatMessages ?? []);
+  const [chatInput, setChatInput] = useState('');
+  const [chatGenerating, setChatGenerating] = useState(false);
+  const [focusPanel, setFocusPanel] = useState<'discussion' | 'chat' | 'image'>('discussion');
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const llmRunId = useRef(0);
   const messagesRef = useRef(messages);
@@ -119,6 +125,8 @@ export function DiscussionRoom() {
   useEffect(() => {
     if (!project) return;
     setMessages(project.messages ?? []);
+    setChatMessages(project.userChatMessages ?? []);
+    setIsChatMode((project.userChatMessages?.length ?? 0) > 0);
     setCurrentIndex(countCompletedExpertTurns(project.messages ?? [], project.selectedExperts));
     setVisionPhase(
       project.screenExtraction
@@ -141,6 +149,11 @@ export function DiscussionRoom() {
     if (!project || messages.length === 0) return;
     updateProject(project.id, { messages });
   }, [messages, project?.id]);
+
+  useEffect(() => {
+    if (!project || chatMessages.length === 0) return;
+    updateProject(project.id, { userChatMessages: chatMessages });
+  }, [chatMessages, project?.id]);
 
   useEffect(() => {
     if (!useLocalLlm || !project || isCompleted) return;
@@ -339,8 +352,78 @@ export function DiscussionRoom() {
     }
   }, [messages, isGenerating]);
 
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [chatMessages, chatGenerating]);
+
+  useEffect(() => {
+    if (isChatMode) setFocusPanel('chat');
+  }, [isChatMode]);
+
   const buildProductContext = (p: ReviewProject) =>
     [p.goal, p.targetAudience, p.domain, p.stage].filter(Boolean).join(' | ');
+
+  const handleSendChat = async () => {
+    if (!project || !chatInput.trim() || chatGenerating) return;
+
+    const selectedExpertObjs = project.selectedExperts
+      .map((id) => experts.find((e) => e.id === id))
+      .filter(Boolean) as typeof experts;
+
+    if (!selectedExpertObjs.length) return;
+
+    const userMsg: DiscussionMessage = {
+      id: `${project.id}-user-${Date.now()}`,
+      expertId: 'user',
+      text: chatInput.trim(),
+      type: 'observation',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    const nextChat = [...chatMessages, userMsg];
+    setChatMessages(nextChat);
+    setChatInput('');
+    setChatGenerating(true);
+
+    try {
+      const responses = await fetchUserChatExpertResponses(
+        userMsg.text,
+        project,
+        messages,
+        nextChat,
+        selectedExpertObjs,
+        expertOverrides,
+        experts,
+        llmSettings
+      );
+
+      const expertMsgs: DiscussionMessage[] = responses.map((r) => ({
+        id: `${project.id}-chat-${r.expertId}-${Date.now()}-${Math.random()}`,
+        expertId: r.expertId,
+        text: r.text,
+        type: r.type,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }));
+
+      setChatMessages((prev) => [...prev, ...expertMsgs]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'שגיאה בצ\'אט';
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `${project.id}-chat-err-${Date.now()}`,
+          expertId: 'system',
+          type: 'status',
+          text: `שגיאה בצ'אט: ${message}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+    } finally {
+      setChatGenerating(false);
+    }
+  };
 
   const handleGenerateReport = async () => {
     if (!project) return;
@@ -356,38 +439,81 @@ export function DiscussionRoom() {
 
       if (project.screenExtraction && selectedExpertObjs.length) {
         if (llmSettings.taskModels.expert_reasoning.provider !== 'mock') {
-          expertReviews = await runAllExpertReasoning(
-            selectedExpertObjs,
-            project.screenExtraction,
-            buildProductContext(project),
-            llmSettings
-          );
+          try {
+            expertReviews = await runAllExpertReasoning(
+              selectedExpertObjs,
+              project.screenExtraction,
+              buildProductContext(project),
+              llmSettings
+            );
+          } catch (error) {
+            console.error('Expert reasoning failed:', error);
+          }
         }
         if (expertReviews?.length && llmSettings.taskModels.report_aggregate.provider !== 'mock') {
-          aggregatedReport =
-            (await aggregateExpertReviews(expertReviews, llmSettings)) ?? undefined;
+          try {
+            aggregatedReport =
+              (await aggregateExpertReviews(expertReviews, llmSettings)) ?? undefined;
+          } catch (error) {
+            console.error('Report aggregate failed:', error);
+          }
         }
       }
 
-      const findings = buildFindingsFromDiscussion(messages, project);
-      const scores = aggregatedReport
-        ? {
-            ...buildScoresFromFindings(findings, project.selectedExperts),
-            overall: aggregatedReport.overall_score,
-          }
-        : buildScoresFromFindings(findings, project.selectedExperts);
+      const liveMessages = messagesRef.current.length > 0 ? messagesRef.current : messages;
+      const liveChatMessages = chatMessages;
+
+      const panelFindings = buildFindingsFromDiscussion(liveMessages, project, {
+        findingSource: 'panel',
+      });
+      const chatFindings = buildFindingsFromDiscussion(liveChatMessages, project, {
+        idPrefix: 'chat-finding',
+        findingSource: 'user_chat',
+      });
+      let findings = mergePanelAndChatFindings(panelFindings, chatFindings);
+
+      if (findings.length === 0 && expertReviews?.length) {
+        findings = buildFindingsFromExpertReviews(expertReviews, project, experts).map((f) => ({
+          ...f,
+          findingSource: 'panel' as const,
+        }));
+      }
+
+      const baseScores = buildScoresFromFindings(findings, project.selectedExperts);
+      const aggregatedOverall =
+        aggregatedReport?.overall_score && aggregatedReport.overall_score > 0
+          ? aggregatedReport.overall_score
+          : null;
+      const scores = aggregatedOverall
+        ? { ...baseScores, overall: aggregatedOverall }
+        : baseScores;
+
+      const scoreExplanations = buildScoreExplanations(
+        scores,
+        findings,
+        experts,
+        liveMessages,
+        expertReviews
+      );
+
+      const executiveSummary = resolveExecutiveSummary(project, findings, experts, {
+        messages: [...liveMessages, ...liveChatMessages],
+        expertReviews,
+        aggregatedReport,
+        screenExtraction: project.screenExtraction,
+      });
 
       updateProject(project.id, {
         status: 'completed',
         completedAt: new Date().toISOString(),
-        messages,
+        messages: liveMessages,
+        userChatMessages: liveChatMessages,
         findings,
         scores,
+        scoreExplanations,
         expertReviews,
         aggregatedReport,
-        executiveSummary:
-          aggregatedReport?.main_summary ??
-          buildExecutiveSummary(findings, experts, project),
+        executiveSummary,
       });
       navigate('report');
     } finally {
@@ -401,7 +527,15 @@ export function DiscussionRoom() {
     .map((id) => experts.find((e) => e.id === id))
     .filter(Boolean);
 
-  const discussionComplete = currentIndex >= totalTurns;
+  const discussionComplete =
+    project.selectedExperts.length === 0
+      ? false
+      : currentIndex >= totalTurns;
+  const expertTurnsInDiscussion = countCompletedExpertTurns(messages, project.selectedExperts);
+  const showPostPanelChoice =
+    discussionComplete && !isCompleted && !isChatMode && expertTurnsInDiscussion > 0;
+  const canGenerateReport =
+    isCompleted || (isChatMode && expertTurnsInDiscussion > 0) || (discussionComplete && expertTurnsInDiscussion > 0 && !showPostPanelChoice);
   const showLoading =
     isPlaying && (isGenerating || visionPhase === 'running' || (useLocalLlm && messages.length > 0));
 
@@ -411,6 +545,7 @@ export function DiscussionRoom() {
       : discussionModel.provider === 'lm_studio'
         ? 'LM Studio'
         : 'דמו';
+  const hasImage = Boolean(getMaterialPreviewUrl(project.material));
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] max-h-screen">
@@ -467,30 +602,58 @@ export function DiscussionRoom() {
             )}
           </div>
 
-          {!isCompleted && (
+          {!isCompleted && !isChatMode && (
             <Button
               variant="secondary"
               size="sm"
               onClick={() => setIsPlaying(!isPlaying)}
-              disabled={isGenerating || analysisBlocked || visionPhase === 'running'}
+              disabled={isGenerating || analysisBlocked || visionPhase === 'running' || discussionComplete}
               title={
                 analysisBlocked
                   ? 'הגדירו LLM מקומי בהגדרות'
-                  : isPlaying
-                    ? 'השהה ניתוח'
-                    : 'המשך ניתוח'
+                  : discussionComplete
+                    ? 'הדיון הסתיים'
+                    : isPlaying
+                      ? 'השהה ניתוח'
+                      : 'המשך ניתוח'
               }
             >
               {isPlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />}
             </Button>
           )}
-          <Button
-            onClick={handleGenerateReport}
-            disabled={(!discussionComplete && !isCompleted) || isGenerating || generatingReport}
-            icon={<ListChecksIcon size={16} />}
-          >
-            {generatingReport ? 'מפיק דוח...' : isCompleted ? 'צפייה בדוח' : 'הפקת דוח סופי'}
-          </Button>
+          {isChatMode && !isCompleted && (
+            <Button
+              onClick={handleGenerateReport}
+              disabled={isGenerating || generatingReport}
+              icon={<ListChecksIcon size={16} />}
+            >
+              {generatingReport ? 'מפיק דוח...' : 'סיים צ\'אט והפק דוח'}
+            </Button>
+          )}
+          {!isChatMode && !showPostPanelChoice && (
+            <Button
+              onClick={() => (isCompleted ? navigate('report') : handleGenerateReport())}
+              disabled={!canGenerateReport || isGenerating || generatingReport}
+              icon={<ListChecksIcon size={16} />}
+            >
+              {generatingReport ? 'מפיק דוח...' : isCompleted ? 'צפייה בדוח' : 'הפקת דוח סופי'}
+            </Button>
+          )}
+          {isCompleted && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleGenerateReport}
+              disabled={isGenerating || generatingReport || expertTurnsInDiscussion === 0}
+              title={
+                expertTurnsInDiscussion === 0
+                  ? 'אין הודעות דיון שמורות — הריצו את הדיון מחדש'
+                  : 'הפיקו דוח מחדש מהודעות הדיון השמורות'
+              }
+            >
+              {generatingReport ? 'מפיק...' : 'הפק דוח מחדש'}
+            </Button>
+          )}
         </div>
       </header>
 
@@ -514,92 +677,47 @@ export function DiscussionRoom() {
         </Card>
       )}
 
-      {materialHasStoredImage(project.material) && (
-        <MaterialPreview material={project.material} compact className="mb-4" />
+      {showPostPanelChoice && (
+        <Card className="mb-4 border-[var(--color-podium-primary-muted)] bg-[var(--color-podium-primary-light)]/50">
+          <h3 className="font-bold text-[var(--color-podium-text)] mb-1">הדיון הסתיים — מה הלאה?</h3>
+          <p className="text-sm text-[var(--color-podium-text-secondary)] mb-4">
+            אפשר להפיק דוח סופי מיד, או לנהל צ&apos;אט עם המומחים כדי לדיון נוסף, לשנות מסקנות, ורק אז להפיק דוח.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Button onClick={handleGenerateReport} disabled={generatingReport} icon={<ListChecksIcon size={16} />}>
+              {generatingReport ? 'מפיק דוח...' : 'הפקת דוח סופי'}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setIsChatMode(true)}
+              icon={<MessageIcon size={16} />}
+            >
+              צ&apos;אט עם המומחים
+            </Button>
+          </div>
+        </Card>
       )}
 
-      <Card padding="none" className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 scroll-smooth">
-          {messages.map((msg) => {
-            if (msg.expertId === 'system') {
-              return (
-                <div key={msg.id} className="flex justify-center my-4">
-                  <div className="bg-[var(--color-podium-surface-muted)] text-[var(--color-podium-text-secondary)] text-xs font-semibold px-4 py-1.5 rounded-full flex items-center gap-2 border border-[var(--color-podium-border)]">
-                    <span className="w-2 h-2 rounded-full border-2 border-[var(--color-podium-text-tertiary)] border-t-transparent animate-spin" />
-                    {msg.text}
-                  </div>
-                </div>
-              );
-            }
-
-            const expert = experts.find((e) => e.id === msg.expertId);
-            if (!expert) return null;
-
-            return (
-              <div key={msg.id} className="flex gap-4 animate-in slide-in-from-bottom-2 fade-in duration-300">
-                <ExpertAvatar
-                  expert={expert}
-                  size={44}
-                  className="border border-[var(--color-podium-border)]"
-                />
-                <div className="flex-1 max-w-2xl">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="font-bold text-[var(--color-podium-text)] text-sm">{expert.name}</span>
-                    <Badge>{expert.role}</Badge>
-                    <span className="text-xs text-[var(--color-podium-text-tertiary)] mr-2">{msg.timestamp}</span>
-                  </div>
-
-                  <div
-                    className={cn(
-                      'p-4 rounded-[var(--radius-podium-lg)] md:rounded-tr-none border leading-relaxed text-sm',
-                      msg.type === 'conflict'
-                        ? 'bg-[var(--color-podium-warning-bg)] border-amber-200 text-amber-900'
-                        : msg.type === 'recommendation'
-                          ? 'bg-[var(--color-podium-success-bg)] border-green-200 text-green-900'
-                          : 'bg-[var(--color-podium-surface-muted)] border-[var(--color-podium-border)] text-[var(--color-podium-text)]'
-                    )}
-                  >
-                    {msg.type === 'conflict' && (
-                      <div className="flex items-center gap-1.5 text-[var(--color-podium-warning)] font-bold text-xs mb-1.5">
-                        <AlertCircleIcon size={14} /> מחלוקת מקצועית
-                      </div>
-                    )}
-                    {msg.text}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          {showLoading && (
-            <div className="flex gap-4 opacity-50">
-              <div className="w-11 h-11 rounded-full bg-[var(--color-podium-border)] animate-pulse flex-shrink-0" />
-              <div className="flex-1 max-w-md">
-                <div className="h-3.5 bg-[var(--color-podium-border)] rounded w-1/4 mb-2 animate-pulse" />
-                <div className="h-14 bg-[var(--color-podium-surface-muted)] rounded-[var(--radius-podium-lg)] animate-pulse" />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="p-4 border-t border-[var(--color-podium-border)] bg-[var(--color-podium-surface-muted)]">
-          <div className="relative max-w-4xl mx-auto">
-            <Input
-              type="text"
-              readOnly
-              icon={<MessageIcon size={16} />}
-              className="cursor-not-allowed opacity-70 pr-10"
-              placeholder={
-                analysisBlocked
-                  ? 'הגדירו LLM מקומי בהגדרות כדי לנתח את החומר שהעליתם.'
-                  : useLocalLlm
-                    ? 'המערכת מנתחת את החומר דרך מודלים מקומיים לפי משימה. ניתן להשהות ולהמשיך.'
-                    : 'מצב דמו — רק לפרויקטים ללא חומר.'
-              }
-            />
-          </div>
-        </div>
-      </Card>
+      <DiscussionFocusPanels
+        focusPanel={focusPanel}
+        onFocusChange={setFocusPanel}
+        material={project.material}
+        hasImage={hasImage}
+        isChatMode={isChatMode}
+        messages={messages}
+        chatMessages={chatMessages}
+        experts={experts}
+        showLoading={showLoading}
+        expertTurnsInDiscussion={expertTurnsInDiscussion}
+        scrollRef={scrollRef}
+        chatScrollRef={chatScrollRef}
+        chatGenerating={chatGenerating}
+        chatInput={chatInput}
+        onChatInputChange={setChatInput}
+        onSendChat={handleSendChat}
+        analysisBlocked={analysisBlocked}
+        useLocalLlm={useLocalLlm}
+      />
     </div>
   );
 }

@@ -1,5 +1,4 @@
-// src/lib/llmRouter.ts — גרסה מעודכנת עם תמיכה ב-Gemini (Vercel)
-// שינויים: הוסף provider 'gemini', chatForTask שולח ל-/api/chat גם ב-production
+// src/lib/llmRouter.ts — routing ל-LLM: admin משתמש במפתח שרת, משתמשים במפתח/שרת משלהם
 
 import { DEFAULT_LLM_SETTINGS, resolveBaseUrl } from './llmDefaults';
 import { InstalledModel, LlmSettings, LlmTask, LocalModelConfig } from '../types/llm';
@@ -16,7 +15,7 @@ export function getTaskConfig(settings: LlmSettings, task: LlmTask): LocalModelC
 
 export function validateTaskConfig(task: LlmTask, config: LocalModelConfig): void {
   if (config.provider === 'mock') return;
-  if (config.provider === 'gemini') return; // Gemini תמיד תומך ב-vision
+  if (config.provider === 'gemini') return;
   if (!config.modelId.trim()) {
     throw new Error(`לא הוגדר מודל למשימה: ${task}`);
   }
@@ -25,7 +24,6 @@ export function validateTaskConfig(task: LlmTask, config: LocalModelConfig): voi
   }
 }
 
-// האם אנחנו על Vercel (production) או dev מקומי
 function isProduction(): boolean {
   return (
     typeof window !== 'undefined' &&
@@ -34,43 +32,33 @@ function isProduction(): boolean {
   );
 }
 
-export async function chatForTask(
+async function requestGeminiChat(
   settings: LlmSettings,
-  task: LlmTask,
+  config: LocalModelConfig,
   messages: ChatMessage[],
-  options: ChatOptions = {}
+  options: ChatOptions,
+  task: LlmTask,
+  hasVision: boolean
 ): Promise<string> {
-  const config = getTaskConfig(settings, task);
+  const userApiKey = settings.geminiApiKey?.trim();
+  const ownCredentials = settings.usesOwnLlmCredentials === true;
 
-  if (config.provider === 'mock') {
-    throw new Error('מצב דמו — אין חיבור LLM למשימה זו');
+  if (ownCredentials && !userApiKey) {
+    throw new Error('חסר מפתח Gemini API. הגדירו בהגדרות LLM.');
   }
-
-  validateTaskConfig(task, config);
-
-  const hasVision = messages.some(
-    (m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')
-  );
-
-  // בפרודקשן (Vercel) — תמיד Gemini ב-/api/chat
-  // בדב — Ollama/LM Studio כמו קודם
-  const useGemini = config.provider === 'gemini' || isProduction();
 
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      provider: useGemini ? 'gemini' : (config.provider as LlmApiProvider),
-      baseUrl: useGemini ? undefined : resolveBaseUrl(settings, config.provider),
-      model: useGemini
-        ? 'gemini-2.0-flash' // מודל ברירת מחדל ב-Vercel
-        : config.modelId,
+      provider: 'gemini',
+      model: config.modelId?.startsWith('gemini') ? config.modelId : 'gemini-2.0-flash',
       messages,
+      apiKey: ownCredentials ? userApiKey : undefined,
       maxTokens:
         options.maxTokens ??
         (hasVision ? 2048 : task === 'report_aggregate' ? 2048 : 1024),
-      temperature:
-        options.temperature ?? (task === 'vision_extract' ? 0.2 : 0.55),
+      temperature: options.temperature ?? (task === 'vision_extract' ? 0.2 : 0.55),
     }),
   });
 
@@ -87,19 +75,90 @@ export async function chatForTask(
   return data.content;
 }
 
+export async function chatForTask(
+  settings: LlmSettings,
+  task: LlmTask,
+  messages: ChatMessage[],
+  options: ChatOptions = {}
+): Promise<string> {
+  const config = getTaskConfig(settings, task);
+
+  if (config.provider === 'mock') {
+    throw new Error('מצב דמו — הגדרו חיבור LLM בהגדרות');
+  }
+
+  validateTaskConfig(task, config);
+
+  const hasVision = messages.some(
+    (m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')
+  );
+
+  if (isProduction() || config.provider === 'gemini') {
+    return requestGeminiChat(settings, config, messages, options, task, hasVision);
+  }
+
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: config.provider as LlmApiProvider,
+      baseUrl: resolveBaseUrl(settings, config.provider),
+      model: config.modelId,
+      messages,
+      maxTokens:
+        options.maxTokens ??
+        (hasVision ? 2048 : task === 'report_aggregate' ? 2048 : 1024),
+      temperature: options.temperature ?? (task === 'vision_extract' ? 0.2 : 0.55),
+    }),
+  });
+
+  const data = (await response.json()) as {
+    ok?: boolean;
+    content?: string;
+    message?: string;
+  };
+
+  if (!response.ok || !data.ok || !data.content) {
+    throw new Error(data.message ?? `שגיאה בביצוע משימת ${task}`);
+  }
+
+  return data.content;
+}
+
+export async function testGeminiConnection(
+  apiKey: string,
+  model = 'gemini-2.0-flash'
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'gemini',
+        model,
+        apiKey: apiKey.trim(),
+        messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
+        maxTokens: 16,
+        temperature: 0,
+      }),
+    });
+
+    const data = (await response.json()) as { ok?: boolean; message?: string; content?: string };
+    if (!response.ok || !data.ok) {
+      return { ok: false, message: data.message ?? 'החיבור נכשל' };
+    }
+    return { ok: true, message: 'החיבור ל-Gemini תקין' };
+  } catch {
+    return { ok: false, message: 'לא ניתן לבדוק את החיבור' };
+  }
+}
+
 export async function fetchInstalledModels(
   provider: 'ollama' | 'lm_studio',
   baseUrl: string
 ): Promise<InstalledModel[]> {
-  // ב-production אין מודלים מקומיים
   if (isProduction()) {
-    return [
-      {
-        id: 'gemini-2.0-flash',
-        name: 'Gemini 2.0 Flash (ענן)',
-        supportsVision: true,
-      },
-    ];
+    return [];
   }
 
   const params = new URLSearchParams({ provider, baseUrl });
@@ -134,9 +193,8 @@ export async function checkProviderHealth(
   provider: 'ollama' | 'lm_studio',
   baseUrl: string
 ): Promise<{ ok: boolean; message: string }> {
-  // ב-production — תמיד Gemini, בדוק שה-API key קיים
   if (isProduction()) {
-    return { ok: true, message: 'Gemini מחובר (ענן)' };
+    return { ok: false, message: 'שרתים מקומיים זמינים רק ב-dev' };
   }
 
   try {
@@ -157,6 +215,6 @@ export async function checkProviderHealth(
 
     return { ok: false, message: data.message ?? `${provider} לא זמין` };
   } catch {
-    return { ok: false, message: 'לא ניתן להתחבר. הריצו npm run dev.' };
+    return { ok: false, message: 'לא ניתן להתחבר. ודאו שהשרת המקומי רץ.' };
   }
 }

@@ -2,6 +2,8 @@ const STORAGE_KEYS = {
   projects: 'uxpert_projects',
   expertOverrides: 'uxpert_expert_overrides',
   llmSettings: 'uxpert_llm_settings',
+  wizardFieldOptions: 'uxpert_wizard_field_options',
+  personaLibrary: 'uxpert_persona_library',
 } as const;
 
 export function loadFromStorage<T>(key: string): T | null {

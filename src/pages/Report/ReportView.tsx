@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppContext } from '../../AppContext';
-import { buildExecutiveSummary } from '../../lib/reportFromDiscussion';
+import { buildScoreExplanations, resolveExecutiveSummary, resolveFindings } from '../../lib/reportFromDiscussion';
 import { showUserSimulationInReport } from '../../lib/projectKind';
 import {
   ChevronRightIcon,
@@ -10,27 +10,93 @@ import {
   CheckCircleIcon,
   TrendingUpIcon,
   UsersIcon,
+  MessageIcon,
 } from '../../components/icons';
 import { cn } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { ExpertAvatar } from '../../components/ui/ExpertAvatar';
+import type { ScoreCategory } from '../../types';
+
+type ReportTab = 'summary' | 'findings' | 'rawResults' | 'userTesting';
+
+const CATEGORY_ICONS: Record<Exclude<ScoreCategory, 'overall'>, typeof CheckCircleIcon> = {
+  clarity: CheckCircleIcon,
+  usability: TrendingUpIcon,
+  trust: AlertTriangleIcon,
+  accessibility: AlertTriangleIcon,
+};
+
+const CATEGORY_COLORS: Record<Exclude<ScoreCategory, 'overall'>, string> = {
+  clarity: 'text-[var(--color-podium-success)]',
+  usability: 'text-[var(--color-podium-info)]',
+  trust: 'text-[var(--color-podium-warning)]',
+  accessibility: 'text-[var(--color-podium-warning)]',
+};
 
 export function ReportView() {
   const { currentProjectId, projects, navigate, experts } = useAppContext();
   const project = projects.find((p) => p.id === currentProjectId);
-  const [activeTab, setActiveTab] = useState<'summary' | 'findings' | 'userTesting'>('summary');
+  const [activeTab, setActiveTab] = useState<ReportTab>('summary');
+
+  const messages = project?.messages ?? [];
+  const userChatMessages = project?.userChatMessages ?? [];
+  const expertMessages = messages.filter((m) => m.expertId !== 'system' && m.expertId !== 'user');
+  const expertReviews = project?.expertReviews ?? [];
+
+  const findings = useMemo(
+    () =>
+      project
+        ? resolveFindings(
+            project,
+            project.findings,
+            messages,
+            expertReviews,
+            experts,
+            project.aggregatedReport,
+            userChatMessages
+          )
+        : [],
+    [project, messages, userChatMessages, expertReviews, experts]
+  );
+
+  const scoreExplanations = useMemo(
+    () =>
+      project?.scoreExplanations ??
+      buildScoreExplanations(
+        project?.scores ?? {},
+        findings,
+        experts,
+        [...messages, ...userChatMessages],
+        expertReviews
+      ),
+    [project?.scoreExplanations, project?.scores, findings, experts, messages, userChatMessages, expertReviews]
+  );
+
+  const showUserTab = project ? showUserSimulationInReport(project) : false;
+
+  useEffect(() => {
+    if (!showUserTab && activeTab === 'userTesting') {
+      setActiveTab('summary');
+    }
+  }, [showUserTab, activeTab]);
 
   if (!project) return <div>Project not found</div>;
 
-  const findings = project.findings ?? [];
-  const overallScore = project.scores?.overall ?? 72;
-  const executiveSummary =
-    project.executiveSummary ?? buildExecutiveSummary(findings, experts, project);
+  const overallScore = project.scores?.overall && project.scores.overall > 0 ? project.scores.overall : 72;
+  const executiveSummary = resolveExecutiveSummary(project, findings, experts, {
+    messages,
+    expertReviews,
+    aggregatedReport: project.aggregatedReport,
+    screenExtraction: project.screenExtraction,
+    savedSummary: project.executiveSummary,
+  });
   const aggregated = project.aggregatedReport;
-  const expertReviews = project.expertReviews ?? [];
   const screenSummary = project.screenExtraction?.screen_summary;
+
+  const overallExplanation = scoreExplanations.find((s) => s.key === 'overall');
+  const categoryExplanations = scoreExplanations.filter((s) => s.key !== 'overall');
 
   const getSeverityVariant = (sev: string): 'danger' | 'warning' | 'info' | 'default' => {
     switch (sev) {
@@ -61,18 +127,16 @@ export function ReportView() {
     }
   };
 
-  const showUserTab = showUserSimulationInReport(project);
-
-  useEffect(() => {
-    if (!showUserTab && activeTab === 'userTesting') {
-      setActiveTab('summary');
-    }
-  }, [showUserTab, activeTab]);
+  const showUserTabResolved = showUserSimulationInReport(project);
 
   const tabs = [
     { id: 'summary' as const, label: 'תקציר מנהלים' },
     { id: 'findings' as const, label: `ממצאים והמלצות (${findings.length})` },
-    ...(showUserTab ? [{ id: 'userTesting' as const, label: 'סימולציית משתמשים' }] : []),
+    {
+      id: 'rawResults' as const,
+      label: `תוצאות מקוריות (${expertMessages.length + userChatMessages.length + expertReviews.length})`,
+    },
+    ...(showUserTabResolved ? [{ id: 'userTesting' as const, label: 'סימולציית משתמשים' }] : []),
   ];
 
   return (
@@ -140,6 +204,11 @@ export function ReportView() {
               <p className="text-xs text-[var(--color-podium-text-tertiary)] mt-1">
                 מבוסס על {project.selectedExperts.length} מומחים ו-{findings.length} ממצאים מהדיון
               </p>
+              {overallExplanation && (
+                <p className="text-xs text-[var(--color-podium-text-secondary)] mt-3 leading-relaxed text-right w-full px-2">
+                  {overallExplanation.explanation}
+                </p>
+              )}
             </Card>
 
             <Card className="md:col-span-3">
@@ -155,7 +224,7 @@ export function ReportView() {
             </Card>
           </div>
 
-          {aggregated && (
+          {aggregated && (aggregated.main_summary?.trim() || aggregated.top_issues.length > 0) && (
             <div className="space-y-5">
               <h3 className="font-bold text-[var(--color-podium-text)] text-lg">תוכנית פעולה מועדפת</h3>
               <Card>
@@ -247,30 +316,67 @@ export function ReportView() {
           )}
 
           <h3 className="font-bold text-[var(--color-podium-text)] text-lg">ציונים לפי קטגוריות</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[
-              { label: 'בהירות ומסרים', score: project.scores?.clarity ?? 85, color: 'text-[var(--color-podium-success)]', icon: CheckCircleIcon },
-              { label: 'שימושיות וזרימה', score: project.scores?.usability ?? 75, color: 'text-[var(--color-podium-info)]', icon: TrendingUpIcon },
-              { label: 'אמון וביטחון', score: project.scores?.trust ?? 62, color: 'text-[var(--color-podium-warning)]', icon: AlertTriangleIcon },
-              { label: 'נגישות', score: project.scores?.accessibility ?? 65, color: 'text-[var(--color-podium-warning)]', icon: AlertTriangleIcon },
-            ].map((cat) => (
-              <Card key={cat.label} padding="sm" className="p-5">
-                <div className="flex items-center gap-2 mb-2">
-                  <cat.icon className={cat.color} size={16} />
-                  <h4 className="font-bold text-[var(--color-podium-text)] text-sm">{cat.label}</h4>
-                </div>
-                <span className="text-2xl font-bold text-[var(--color-podium-text)]">{cat.score}</span>
-              </Card>
-            ))}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {categoryExplanations.map((cat) => {
+              const Icon = CATEGORY_ICONS[cat.key as Exclude<ScoreCategory, 'overall'>];
+              const color = CATEGORY_COLORS[cat.key as Exclude<ScoreCategory, 'overall'>];
+              return (
+                <Card key={cat.key} padding="sm" className="p-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Icon className={color} size={16} />
+                      <h4 className="font-bold text-[var(--color-podium-text)] text-sm">{cat.label}</h4>
+                    </div>
+                    <span className="text-2xl font-bold text-[var(--color-podium-text)]">{cat.score}</span>
+                  </div>
+                  <p className="text-sm text-[var(--color-podium-text-secondary)] leading-relaxed mb-3">
+                    {cat.explanation}
+                  </p>
+                  {cat.factors.length > 0 && (
+                    <ul className="text-xs text-[var(--color-podium-text-tertiary)] space-y-1 border-t border-[var(--color-podium-border)] pt-3">
+                      {cat.factors.map((factor, i) => (
+                        <li key={i}>• {factor}</li>
+                      ))}
+                    </ul>
+                  )}
+                </Card>
+              );
+            })}
           </div>
+
+          {overallExplanation && overallExplanation.factors.length > 0 && (
+            <Card padding="sm" className="p-5">
+              <h4 className="font-bold text-sm text-[var(--color-podium-text)] mb-2">
+                גורמים שמשפיעים על הציון הכללי
+              </h4>
+              <ul className="text-sm text-[var(--color-podium-text-secondary)] space-y-1">
+                {overallExplanation.factors.map((factor, i) => (
+                  <li key={i}>• {factor}</li>
+                ))}
+              </ul>
+            </Card>
+          )}
         </div>
       )}
 
       {activeTab === 'findings' && (
         <div className="space-y-5 animate-in fade-in">
           {findings.length === 0 ? (
-            <Card padding="lg" className="text-center text-[var(--color-podium-text-secondary)] text-sm">
-              אין ממצאים בדוח זה. הפיקו דוח רק לאחר דיון שהסתיים, כדי שהתובנות יישמרו מהשיחה בין המומחים.
+            <Card padding="lg" className="text-center text-[var(--color-podium-text-secondary)] text-sm space-y-3">
+              <p>אין ממצאים בדוח זה.</p>
+              {project.screenExtraction && expertMessages.length === 0 && (
+                <p className="text-[var(--color-podium-text-tertiary)]">
+                  ניתוח Vision הושלם, אך הדיון עם המומחים לא נשמר — כנראה הדוח הופק לפני שכל המומחים סיימו לדבר.
+                </p>
+              )}
+              {expertMessages.length > 0 && (
+                <p className="text-[var(--color-podium-text-tertiary)]">
+                  יש {expertMessages.length} הודעות דיון — בדקו בטאב &quot;תוצאות מקוריות&quot;.
+                </p>
+              )}
+              <Button size="sm" variant="secondary" onClick={() => navigate('discussion')}>
+                חזרה לחדר הדיון להפקת דוח מחדש
+              </Button>
             </Card>
           ) : null}
           {findings.map((finding) => (
@@ -278,6 +384,11 @@ export function ReportView() {
               <div className="p-6 md:w-3/4 flex flex-col">
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <Badge variant={getSeverityVariant(finding.severity)}>חומרה: {getSeverityHebrew(finding.severity)}</Badge>
+                  {finding.findingSource === 'user_chat' ? (
+                    <Badge variant="info">מצ&apos;אט עם המומחים</Badge>
+                  ) : (
+                    <Badge variant="primary">מדיון ראשוני</Badge>
+                  )}
                   <Badge>מיקוד: {finding.location}</Badge>
                 </div>
 
@@ -324,49 +435,181 @@ export function ReportView() {
         </div>
       )}
 
+      {activeTab === 'rawResults' && (
+        <div className="space-y-6 animate-in fade-in">
+          {expertMessages.length === 0 && expertReviews.length === 0 && userChatMessages.length === 0 ? (
+            <Card padding="lg" className="text-center text-[var(--color-podium-text-secondary)] text-sm">
+              <MessageIcon className="mx-auto mb-3 text-[var(--color-podium-text-tertiary)]" size={32} />
+              אין תוצאות מקוריות שמורות. ודאו שהדיון הסתיים לפני הפקת הדוח.
+            </Card>
+          ) : (
+            <>
+              {expertMessages.length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="font-bold text-[var(--color-podium-text)] text-lg">
+                    שיחת הדיון ({expertMessages.length} הודעות)
+                  </h3>
+                  {messages.map((msg) => {
+                    if (msg.expertId === 'system') {
+                      return (
+                        <div key={msg.id} className="flex justify-center">
+                          <Badge variant="default">{msg.text}</Badge>
+                        </div>
+                      );
+                    }
+                    if (msg.expertId === 'user') return null;
+                    const expert = experts.find((e) => e.id === msg.expertId);
+                    if (!expert) return null;
+                    return (
+                      <Card key={msg.id} padding="sm" className="p-4">
+                        <div className="flex items-center gap-3 mb-3">
+                          <ExpertAvatar expert={expert} size={36} />
+                          <div>
+                            <p className="font-bold text-sm text-[var(--color-podium-text)]">{expert.name}</p>
+                            <p className="text-xs text-[var(--color-podium-text-tertiary)]">
+                              {expert.role} • {msg.timestamp}
+                              {msg.type !== 'observation' && ` • ${msg.type}`}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="text-sm text-[var(--color-podium-text-secondary)] leading-relaxed whitespace-pre-wrap">
+                          {msg.text}
+                        </p>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+
+              {userChatMessages.length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="font-bold text-[var(--color-podium-text)] text-lg">
+                    צ&apos;אט עם המומחים ({userChatMessages.length} הודעות)
+                  </h3>
+                  {userChatMessages.map((msg) => {
+                    if (msg.expertId === 'system') {
+                      return (
+                        <div key={msg.id} className="flex justify-center">
+                          <Badge variant="warning">{msg.text}</Badge>
+                        </div>
+                      );
+                    }
+                    if (msg.expertId === 'user') {
+                      return (
+                        <Card key={msg.id} padding="sm" className="p-4 bg-[var(--color-podium-primary-light)]">
+                          <p className="text-xs font-semibold text-[var(--color-podium-primary)] mb-1">את/ה</p>
+                          <p className="text-sm text-[var(--color-podium-text)] whitespace-pre-wrap">{msg.text}</p>
+                        </Card>
+                      );
+                    }
+                    const expert = experts.find((e) => e.id === msg.expertId);
+                    if (!expert) return null;
+                    return (
+                      <Card key={msg.id} padding="sm" className="p-4">
+                        <div className="flex items-center gap-3 mb-3">
+                          <ExpertAvatar expert={expert} size={36} />
+                          <div>
+                            <p className="font-bold text-sm text-[var(--color-podium-text)]">{expert.name}</p>
+                            <p className="text-xs text-[var(--color-podium-text-tertiary)]">{msg.timestamp}</p>
+                          </div>
+                        </div>
+                        <p className="text-sm text-[var(--color-podium-text-secondary)] whitespace-pre-wrap">{msg.text}</p>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+
+              {expertReviews.length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="font-bold text-[var(--color-podium-text)] text-lg">
+                    ניתוחי מומחים מובנים ({expertReviews.length})
+                  </h3>
+                  {expertReviews.map((review) => (
+                    <Card key={review.expert} padding="sm" className="p-5">
+                      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                        <h4 className="font-bold text-[var(--color-podium-text)]">{review.expert}</h4>
+                        <Badge variant="primary">ציון: {review.score}/100</Badge>
+                      </div>
+                      <p className="text-sm text-[var(--color-podium-text-secondary)] leading-relaxed mb-4 whitespace-pre-wrap">
+                        {review.summary}
+                      </p>
+                      {review.findings.length > 0 && (
+                        <div className="space-y-3 border-t border-[var(--color-podium-border)] pt-4">
+                          <h5 className="text-sm font-bold text-[var(--color-podium-text)]">ממצאים</h5>
+                          {review.findings.map((f, i) => (
+                            <div
+                              key={i}
+                              className="p-3 rounded-[var(--radius-podium-md)] bg-[var(--color-podium-surface-muted)] text-sm"
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <Badge variant={f.severity === 'high' ? 'danger' : f.severity === 'medium' ? 'warning' : 'info'}>
+                                  {f.severity}
+                                </Badge>
+                                <span className="font-semibold text-[var(--color-podium-text)]">{f.issue}</span>
+                              </div>
+                              {f.evidence_from_screen && (
+                                <p className="text-[var(--color-podium-text-secondary)] mb-1">
+                                  <span className="font-semibold">ראיה:</span> {f.evidence_from_screen}
+                                </p>
+                              )}
+                              {f.why_it_matters && (
+                                <p className="text-[var(--color-podium-text-secondary)] mb-1">
+                                  <span className="font-semibold">למה זה חשוב:</span> {f.why_it_matters}
+                                </p>
+                              )}
+                              {f.recommendation && (
+                                <p className="text-[var(--color-podium-text)]">
+                                  <span className="font-semibold">המלצה:</span> {f.recommendation}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {review.quick_wins.length > 0 && (
+                        <div className="mt-3">
+                          <h5 className="text-sm font-bold text-[var(--color-podium-success)] mb-1">Quick wins</h5>
+                          <ul className="text-sm text-[var(--color-podium-text-secondary)] space-y-1">
+                            {review.quick_wins.map((w, i) => (
+                              <li key={i}>• {w}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {review.open_questions.length > 0 && (
+                        <p className="text-xs text-[var(--color-podium-text-tertiary)] mt-3">
+                          שאלות פתוחות: {review.open_questions.join('; ')}
+                        </p>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              )}
+
+              {screenSummary && (
+                <Card padding="sm" className="p-4">
+                  <h4 className="font-bold text-sm text-[var(--color-podium-text)] mb-2">סיכום Vision (מקור)</h4>
+                  <p className="text-sm text-[var(--color-podium-text-secondary)]">{screenSummary}</p>
+                </Card>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {activeTab === 'userTesting' && (
-        <Card padding="lg" className="flex flex-col items-center justify-center text-center min-h-[400px] animate-in fade-in">
+        <Card padding="lg" className="flex flex-col items-center justify-center text-center min-h-[300px] animate-in fade-in">
           <UsersIcon className="text-[var(--color-podium-primary)]/30 mb-4" size={56} />
-          <h2 className="text-xl font-bold text-[var(--color-podium-text)] mb-2">סימולציית משתמשים התנהגותית</h2>
+          <h2 className="text-xl font-bold text-[var(--color-podium-text)] mb-2">סימולציית משתמשים</h2>
           <p className="text-[var(--color-podium-text-secondary)] max-w-lg mb-6 text-sm">
-            בבדיקה זו סומלצו 2 פרסונות, המשקפות התנהגויות קצה שהוגדרו מראש. הממצאים שוקללו אל תוך הדוח.
+            {project.personaRuns?.length
+              ? `${project.personaRuns.length} פרסונות נותחו לפי מתודולוגיית 9 השלבים.`
+              : 'תוצאות סימולציה זמינות בדוח בדיקת משתמשים.'}
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-2xl text-right">
-            <Card padding="sm" className="p-4">
-              <h4 className="font-bold text-[var(--color-podium-text)] mb-2 text-sm">משתמשת 1: לחוצה בזמן</h4>
-              <div className="space-y-2 text-sm">
-                <p className="flex justify-between">
-                  <span className="text-[var(--color-podium-text-secondary)]">הצלחת משימה:</span>
-                  <span className="font-bold text-[var(--color-podium-warning)]">60%</span>
-                </p>
-                <p className="flex justify-between">
-                  <span className="text-[var(--color-podium-text-secondary)]">סיכוי נטישה:</span>
-                  <span className="font-bold text-[var(--color-podium-danger)]">גבוה</span>
-                </p>
-                <p className="flex justify-between">
-                  <span className="text-[var(--color-podium-text-secondary)]">חסם עיקרי:</span>
-                  <span className="font-bold text-[var(--color-podium-text)]">עומס קריאה</span>
-                </p>
-              </div>
-            </Card>
-            <Card padding="sm" className="p-4">
-              <h4 className="font-bold text-[var(--color-podium-text)] mb-2 text-sm">משתמש 2: חושש מהתחייבות</h4>
-              <div className="space-y-2 text-sm">
-                <p className="flex justify-between">
-                  <span className="text-[var(--color-podium-text-secondary)]">הצלחת משימה:</span>
-                  <span className="font-bold text-[var(--color-podium-success)]">90%</span>
-                </p>
-                <p className="flex justify-between">
-                  <span className="text-[var(--color-podium-text-secondary)]">סיכוי נטישה:</span>
-                  <span className="font-bold text-[var(--color-podium-warning)]">בינוני</span>
-                </p>
-                <p className="flex justify-between">
-                  <span className="text-[var(--color-podium-text-secondary)]">חסם עיקרי:</span>
-                  <span className="font-bold text-[var(--color-podium-text)]">ניסוח כפתור סיום</span>
-                </p>
-              </div>
-            </Card>
-          </div>
+          {project.reviewKind === 'user' && (
+            <Button onClick={() => navigate('user-simulation')}>צפייה בתוצאות מלאות</Button>
+          )}
         </Card>
       )}
     </div>
