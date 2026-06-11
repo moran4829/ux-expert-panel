@@ -365,14 +365,39 @@ export function LoginPage() {
   const [mode, setMode] = useState<Mode>('login');
 
   if (!firebaseReady) {
+    const isHosted =
+      typeof window !== 'undefined' &&
+      !window.location.hostname.includes('localhost') &&
+      !window.location.hostname.includes('127.0.0.1');
+
     return (
       <div className="relative min-h-screen flex items-center justify-center p-6 rtl overflow-hidden">
         <LoginLandscapeBackground />
         <div className="relative z-10 w-full max-w-md">
           <LoginBranding />
           <Card className="login-card border-white/80">
-            <h2 className="text-lg font-bold text-[var(--color-podium-text)] mb-2 text-center">Firebase לא מוגדר</h2>
-            <p className="text-sm text-[var(--color-podium-text-secondary)] text-center">חסר קובץ .env.local</p>
+            <h2 className="text-lg font-bold text-[var(--color-podium-text)] mb-2 text-center">
+              Firebase לא מוגדר
+            </h2>
+            {isHosted ? (
+              <div className="text-sm text-[var(--color-podium-text-secondary)] space-y-2 leading-relaxed">
+                <p>
+                  ב-Vercel חסרים משתני סביבה <code className="text-xs bg-black/5 px-1 rounded">VITE_FIREBASE_*</code>.
+                </p>
+                <p>
+                  Settings → Environment Variables — העתיקי מ-<code className="text-xs">.env.local</code>, שמרי,
+                  ואז <strong>Redeploy</strong>.
+                </p>
+                <p className="text-xs text-[var(--color-podium-text-tertiary)]">
+                  פירוט: <code className="text-xs">firebase/SETUP-HE.md</code>
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-[var(--color-podium-text-secondary)] text-center">
+                צרי <code className="text-xs">.env.local</code> עם משתני Firebase —{' '}
+                <code className="text-xs">npm run setup:env</code>
+              </p>
+            )}
           </Card>
         </div>
       </div>
