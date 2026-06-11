@@ -65,7 +65,13 @@ export function UserTestWizard() {
     setPrepareStatus('יוצר פרסונות ומריץ סימולציה...');
 
     try {
-      const material = await resolveTestMaterial(formData.testType, formData.url, uploadedFiles);
+      const projectId = 'proj-' + Date.now();
+      const material = await resolveTestMaterial(
+        formData.testType,
+        formData.url,
+        uploadedFiles,
+        projectId
+      );
       setMaterialPreview(material);
 
       const displayUrl =
@@ -74,7 +80,7 @@ export function UserTestWizard() {
       const projectName = formData.name.trim() || deriveProjectName(material, formData.url);
 
       const newProj = {
-        id: 'proj-' + Date.now(),
+        id: projectId,
         ...formData,
         name: projectName,
         url: displayUrl,

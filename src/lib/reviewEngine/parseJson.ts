@@ -12,7 +12,27 @@ export function extractJsonFromText(text: string): string {
   return trimmed;
 }
 
+function repairTruncatedJson(jsonStr: string): string {
+  let repaired = jsonStr.trim();
+  if (!repaired) return repaired;
+
+  repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+
+  const openBraces = (repaired.match(/{/g) ?? []).length;
+  const closeBraces = (repaired.match(/}/g) ?? []).length;
+  const openBrackets = (repaired.match(/\[/g) ?? []).length;
+  const closeBrackets = (repaired.match(/]/g) ?? []).length;
+
+  repaired += ']'.repeat(Math.max(0, openBrackets - closeBrackets));
+  repaired += '}'.repeat(Math.max(0, openBraces - closeBraces));
+  return repaired;
+}
+
 export function parseJsonResponse<T>(text: string): T {
   const jsonStr = extractJsonFromText(text);
-  return JSON.parse(jsonStr) as T;
+  try {
+    return JSON.parse(jsonStr) as T;
+  } catch {
+    return JSON.parse(repairTruncatedJson(jsonStr)) as T;
+  }
 }

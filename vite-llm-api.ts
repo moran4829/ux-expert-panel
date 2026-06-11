@@ -90,6 +90,23 @@ function normalizeLmStudioBase(baseUrl: string): string {
   return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
 }
 
+function formatFetchError(error: unknown, provider: string, baseUrl: string): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  const cause = error instanceof Error && 'cause' in error ? String((error as { cause?: unknown }).cause) : '';
+  const isConnectionError =
+    msg.includes('fetch failed') ||
+    msg.includes('ECONNREFUSED') ||
+    cause.includes('ECONNREFUSED');
+
+  if (isConnectionError) {
+    if (provider === 'ollama') {
+      return `Ollama לא זמין ב-${baseUrl}. התקינו מ-ollama.com והריצו את האפליקציה, או עברו ל-LM Studio בהגדרות → מנועי LLM.`;
+    }
+    return `LM Studio לא זמין ב-${baseUrl}. הפעילו Local Server ב-LM Studio וטענו מודל.`;
+  }
+  return msg;
+}
+
 function guessVisionSupport(modelId: string): boolean {
   const lower = modelId.toLowerCase();
   return (
@@ -270,9 +287,11 @@ export function llmApiPlugin(): Plugin {
                   );
             sendJson(res, 200, { ok: true, provider, models });
           } catch (error) {
+            const provider = parseUrlParams(url).get('provider') ?? 'ollama';
+            const baseUrl = parseUrlParams(url).get('baseUrl') ?? 'http://localhost:11434';
             sendJson(res, 503, {
               ok: false,
-              message: error instanceof Error ? error.message : 'Failed to list models',
+              message: formatFetchError(error, provider, baseUrl),
             });
           }
           return;
@@ -299,30 +318,34 @@ export function llmApiPlugin(): Plugin {
               sendJson(res, 200, { ok: true, provider: 'lm_studio', models: data });
             }
           } catch (error) {
+            const params = parseUrlParams(url);
+            const provider = params.get('provider') ?? 'lm_studio';
+            const baseUrl =
+              params.get('baseUrl') ??
+              (provider === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234/v1');
             sendJson(res, 503, {
               ok: false,
-              message: error instanceof Error ? error.message : 'LLM server unreachable',
+              message: formatFetchError(error, provider, baseUrl),
             });
           }
           return;
         }
 
         if (url.startsWith('/api/llm/pull') && req.method === 'POST') {
+          let pullBaseUrl = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
           try {
             const body = (await readJsonBody(req)) as { baseUrl?: string; model?: string };
             if (!body?.model) {
               sendJson(res, 400, { ok: false, message: 'Missing model' });
               return;
             }
-            const result = await pullOllamaModel(
-              body.baseUrl ?? process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434',
-              body.model
-            );
+            pullBaseUrl = body.baseUrl ?? pullBaseUrl;
+            const result = await pullOllamaModel(pullBaseUrl, body.model);
             sendJson(res, 200, { ok: true, result });
           } catch (error) {
             sendJson(res, 500, {
               ok: false,
-              message: error instanceof Error ? error.message : 'Pull failed',
+              message: formatFetchError(error, 'ollama', pullBaseUrl),
             });
           }
           return;
@@ -333,19 +356,24 @@ export function llmApiPlugin(): Plugin {
           return;
         }
 
+        let chatBody: ChatRequestBody | undefined;
         try {
-          const body = (await readJsonBody(req)) as ChatRequestBody;
-          if (!body?.messages?.length) {
+          chatBody = (await readJsonBody(req)) as ChatRequestBody;
+          if (!chatBody?.messages?.length) {
             sendJson(res, 400, { ok: false, message: 'Missing messages' });
             return;
           }
 
-          const result = await proxyChat(body);
+          const result = await proxyChat(chatBody);
           sendJson(res, 200, { ok: true, ...result });
         } catch (error) {
+          const provider = chatBody?.provider ?? 'lm_studio';
+          const baseUrl =
+            chatBody?.baseUrl ??
+            (provider === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234/v1');
           sendJson(res, 500, {
             ok: false,
-            message: error instanceof Error ? error.message : 'Chat request failed',
+            message: formatFetchError(error, provider, baseUrl),
           });
         }
       });

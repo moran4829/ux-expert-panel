@@ -11,7 +11,8 @@ import { isLocalLlmActive } from '../../lib/llmDefaults';
 import { aggregateExpertReviews } from '../../lib/reviewEngine/aggregateReport';
 import { runAllExpertReasoning } from '../../lib/reviewEngine/expertReasoning';
 import { runVisionExtractionForProject } from '../../lib/reviewEngine/visionExtract';
-import { hasAnalyzableMaterial } from '../../lib/testMaterial';
+import { hasAnalyzableMaterial, materialHasStoredImage } from '../../lib/testMaterial';
+import { MaterialPreview } from '../../components/MaterialPreview';
 import { DiscussionMessage, ReviewProject } from '../../types';
 import {
   PlayIcon,
@@ -29,6 +30,32 @@ import { ExpertAvatar } from '../../components/ui/ExpertAvatar';
 import { Input } from '../../components/ui/Input';
 
 type VisionPhase = 'idle' | 'running' | 'done' | 'skipped' | 'failed';
+
+function countCompletedExpertTurns(
+  messages: DiscussionMessage[],
+  expertIds: string[]
+): number {
+  const expertSet = new Set(expertIds);
+  return messages.filter((m) => expertSet.has(m.expertId)).length;
+}
+
+function hasVisionFailureNotice(messages: DiscussionMessage[]): boolean {
+  return messages.some(
+    (m) => m.expertId === 'system' && m.text.includes('חילוץ Vision נכשל')
+  );
+}
+
+function shouldResumeDiscussion(
+  project: ReviewProject,
+  expertIds: string[],
+  requiresRealAnalysis: boolean,
+  useLocalLlm: boolean
+): boolean {
+  if (project.status === 'completed') return false;
+  if (requiresRealAnalysis && !useLocalLlm) return false;
+  const completedTurns = countCompletedExpertTurns(project.messages ?? [], expertIds);
+  return completedTurns < expertIds.length;
+}
 
 export function DiscussionRoom() {
   const {
@@ -56,14 +83,19 @@ export function DiscussionRoom() {
     : DEFAULT_DISCUSSION_MESSAGES.length;
 
   const savedMessages = project?.messages ?? [];
-  const hasSavedDiscussion = savedMessages.length > 0;
+  const savedExpertTurns = countCompletedExpertTurns(
+    savedMessages,
+    project?.selectedExperts ?? []
+  );
   const isCompleted = project?.status === 'completed';
 
   const [messages, setMessages] = useState<DiscussionMessage[]>(savedMessages);
   const [isPlaying, setIsPlaying] = useState(
-    !hasSavedDiscussion && !isCompleted && !(requiresRealAnalysis && !useLocalLlm)
+    project
+      ? shouldResumeDiscussion(project, expertTurnOrder, requiresRealAnalysis, useLocalLlm)
+      : false
   );
-  const [currentIndex, setCurrentIndex] = useState(savedMessages.length);
+  const [currentIndex, setCurrentIndex] = useState(savedExpertTurns);
   const [isGenerating, setIsGenerating] = useState(false);
   const [visionPhase, setVisionPhase] = useState<VisionPhase>(
     project?.screenExtraction ? 'done' : 'idle'
@@ -87,10 +119,22 @@ export function DiscussionRoom() {
   useEffect(() => {
     if (!project) return;
     setMessages(project.messages ?? []);
-    setCurrentIndex(project.messages?.length ?? 0);
-    setVisionPhase(project.screenExtraction ? 'done' : 'idle');
-    const blocked = hasAnalyzableMaterial(project) && !isLocalLlmActive(llmSettings);
-    setIsPlaying(!project.messages?.length && project.status !== 'completed' && !blocked);
+    setCurrentIndex(countCompletedExpertTurns(project.messages ?? [], project.selectedExperts));
+    setVisionPhase(
+      project.screenExtraction
+        ? 'done'
+        : hasVisionFailureNotice(project.messages ?? [])
+          ? 'failed'
+          : 'idle'
+    );
+    setIsPlaying(
+      shouldResumeDiscussion(
+        project,
+        project.selectedExperts,
+        hasAnalyzableMaterial(project),
+        isLocalLlmActive(llmSettings)
+      )
+    );
   }, [project?.id, llmSettings]);
 
   useEffect(() => {
@@ -104,12 +148,16 @@ export function DiscussionRoom() {
       setVisionPhase('done');
       return;
     }
-    if (!project.material?.imageDataUrl) {
+    if (!materialHasStoredImage(project.material)) {
       setVisionPhase('skipped');
       return;
     }
     if (llmSettings.taskModels.vision_extract.provider === 'mock') {
       setVisionPhase('skipped');
+      return;
+    }
+    if (hasVisionFailureNotice(project.messages ?? [])) {
+      setVisionPhase('failed');
       return;
     }
 
@@ -182,7 +230,6 @@ export function DiscussionRoom() {
 
   useEffect(() => {
     if (!useLocalLlm || !isPlaying || isCompleted || !project) return;
-    if (visionPhase === 'running') return;
     if (currentIndex >= expertTurnOrder.length) {
       setIsPlaying(false);
       return;
@@ -204,7 +251,8 @@ export function DiscussionRoom() {
       if (!liveProject) return;
 
       let prior = messagesRef.current;
-      if (currentIndex === 0 && prior.length === 0) {
+      const completedExpertTurns = countCompletedExpertTurns(prior, expertTurnOrder);
+      if (currentIndex === 0 && completedExpertTurns === 0) {
         const intro: DiscussionMessage = {
           id: `${liveProject.id}-intro-${Date.now()}`,
           expertId: 'system',
@@ -212,8 +260,8 @@ export function DiscussionRoom() {
           text: `מתחבר ל-${discussionModel.provider} (${discussionModel.modelId})${
             liveProject.screenExtraction
               ? ' — מנתח לפי JSON מחולץ'
-              : liveProject.material?.imageDataUrl
-                ? ' — מנתח תמונה/מסך'
+              : materialHasStoredImage(liveProject.material)
+                ? ` — מנתח תמונה/מסך${liveProject.material?.imageUrl ? ' (מהשרת)' : ''}`
                 : liveProject.material?.sourceUrl
                   ? ` — חומר מקישור: ${liveProject.material.sourceUrl}`
                   : ''
@@ -464,6 +512,10 @@ export function DiscussionRoom() {
         <Card className="mb-4 border-amber-200 bg-[var(--color-podium-warning-bg)]">
           <p className="text-sm text-amber-800">{visionWarning}</p>
         </Card>
+      )}
+
+      {materialHasStoredImage(project.material) && (
+        <MaterialPreview material={project.material} compact className="mb-4" />
       )}
 
       <Card padding="none" className="flex-1 flex flex-col min-h-0 overflow-hidden">

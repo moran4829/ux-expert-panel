@@ -2,7 +2,12 @@ import { buildExpertSkillMarkdown } from './expertSkill';
 import { DEFAULT_LLM_SETTINGS } from './llmDefaults';
 import { chatForTask, checkProviderHealth } from './llmRouter';
 import { formatScreenExtractionForPrompt } from './reviewEngine/visionExtract';
-import { hasAnalyzableMaterial, materialContextLines } from './testMaterial';
+import {
+  hasAnalyzableMaterial,
+  materialContextLines,
+  materialHasStoredImage,
+  resolveMaterialImageDataUrl,
+} from './testMaterial';
 import { DiscussionMessage, Expert, ExpertOverrides, ReviewProject } from '../types';
 import { LlmSettings } from '../types/llm';
 import type { ChatContentPart } from '../../vite-llm-api';
@@ -59,7 +64,8 @@ function buildUserMessageContent(
   project: ReviewProject,
   expertName: string,
   transcript: string,
-  includeImage: boolean
+  includeImage: boolean,
+  resolvedImageDataUrl?: string
 ): string | ChatContentPart[] {
   const text = `${buildMaterialFirstContext(project)}
 
@@ -68,7 +74,7 @@ ${ANALYSIS_RULES}
 התחל בשורה הראשונה באחד מהתגים: [OBSERVATION], [CONFLICT], או [RECOMMENDATION].
 אחרי התג — תובנה אחת ספציפית עם ראיה מהמסך (2–4 משפטים).`;
 
-  const imageUrl = includeImage ? project.material?.imageDataUrl : undefined;
+  const imageUrl = includeImage ? resolvedImageDataUrl : undefined;
   if (imageUrl) {
     return [
       {
@@ -100,7 +106,8 @@ export function buildExpertDiscussionPrompt(
   priorMessages: DiscussionMessage[],
   expertOverrides: ExpertOverrides,
   allExperts: Expert[],
-  settings: LlmSettings = DEFAULT_LLM_SETTINGS
+  settings: LlmSettings = DEFAULT_LLM_SETTINGS,
+  resolvedImageDataUrl?: string
 ): { system: string; user: string | ChatContentPart[] } {
   const skillExtra = expertOverrides[expert.id]?.skillExtra;
   const skillMarkdown = buildExpertSkillMarkdown(expert, skillExtra);
@@ -118,7 +125,7 @@ export function buildExpertDiscussionPrompt(
 
   const discussionConfig = settings.taskModels.discussion_turn;
   const includeImage =
-    Boolean(project.material?.imageDataUrl) &&
+    Boolean(resolvedImageDataUrl) &&
     discussionConfig.supportsVision &&
     discussionConfig.provider !== 'mock';
 
@@ -128,7 +135,13 @@ export function buildExpertDiscussionPrompt(
 אתה משתתף בפאנל מומחי UX. דבר בעברית, בגוף ראשון.
 ${ANALYSIS_RULES}`;
 
-  const user = buildUserMessageContent(project, expert.name, transcript, includeImage);
+  const user = buildUserMessageContent(
+    project,
+    expert.name,
+    transcript,
+    includeImage,
+    resolvedImageDataUrl
+  );
 
   return { system, user };
 }
@@ -141,13 +154,18 @@ export async function fetchExpertDiscussionMessage(
   allExperts: Expert[],
   settings: LlmSettings = DEFAULT_LLM_SETTINGS
 ): Promise<{ text: string; type: DiscussionMessage['type'] }> {
+  const resolvedImageDataUrl = materialHasStoredImage(project.material)
+    ? await resolveMaterialImageDataUrl(project.material)
+    : undefined;
+
   const { system, user } = buildExpertDiscussionPrompt(
     expert,
     project,
     priorMessages,
     expertOverrides,
     allExperts,
-    settings
+    settings,
+    resolvedImageDataUrl
   );
 
   const hasVision = Array.isArray(user);

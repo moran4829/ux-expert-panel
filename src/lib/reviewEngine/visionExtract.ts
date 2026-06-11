@@ -1,3 +1,4 @@
+import { resolveMaterialImageDataUrl } from '../testMaterial';
 import { chatForTask } from '../llmRouter';
 import { LlmSettings } from '../../types/llm';
 import { ScreenExtraction } from '../../types/reviewEngine';
@@ -42,7 +43,7 @@ export async function extractScreenFromImage(
         ],
       },
     ],
-    { maxTokens: 2048, temperature: 0.2 }
+    { maxTokens: 4096, temperature: 0.2 }
   );
 
   try {
@@ -64,7 +65,7 @@ export async function extractScreenFromImage(
           ],
         },
       ],
-      { maxTokens: 2048, temperature: 0.1 }
+      { maxTokens: 4096, temperature: 0.1 }
     );
     return normalizeScreenExtraction(parseJsonResponse<Partial<ScreenExtraction>>(retry));
   }
@@ -74,10 +75,10 @@ export async function runVisionExtractionForProject(
   project: ReviewProject,
   settings: LlmSettings
 ): Promise<ScreenExtraction | null> {
-  const imageUrl = project.material?.imageDataUrl;
-  if (!imageUrl) return null;
   if (settings.taskModels.vision_extract.provider === 'mock') return null;
-  return extractScreenFromImage(imageUrl, settings);
+  const imageDataUrl = await resolveMaterialImageDataUrl(project.material);
+  if (!imageDataUrl) return null;
+  return extractScreenFromImage(imageDataUrl, settings);
 }
 
 export function formatScreenExtractionForPrompt(extraction: ScreenExtraction): string {

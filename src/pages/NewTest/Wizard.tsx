@@ -2,10 +2,13 @@ import React, { useState } from 'react';
 import { useAppContext } from '../../AppContext';
 import {
   deriveProjectName,
+  getMaterialPreviewUrl,
   isHttpUrl,
+  materialHasStoredImage,
   resolveTestMaterial,
   wizardHasMaterialInput,
 } from '../../lib/testMaterial';
+import { MaterialPreview } from '../../components/MaterialPreview';
 import type { TestMaterial } from '../../types/material';
 import {
   ChevronLeftIcon,
@@ -44,6 +47,7 @@ export function Wizard() {
   const [materialError, setMaterialError] = useState<string | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [materialPreview, setMaterialPreview] = useState<TestMaterial | null>(null);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
   const [prepareStatus, setPrepareStatus] = useState<string | null>(null);
 
@@ -66,11 +70,19 @@ export function Wizard() {
     setPrepareStatus('מכין חומרים לניתוח...');
 
     try {
-      const material = await resolveTestMaterial(formData.testType, formData.url, uploadedFiles);
+      const projectId = 'proj-' + Date.now();
+      const material = await resolveTestMaterial(
+        formData.testType,
+        formData.url,
+        uploadedFiles,
+        projectId
+      );
       setMaterialPreview(material);
       setPrepareStatus(
-        material.imageDataUrl
-          ? 'חומר ויזואלי נטען — המומחים ינתחו את התמונה/המסך'
+        materialHasStoredImage(material)
+          ? material.imageUrl
+            ? `התמונה נשמרה בשרת (${material.imageUrl})`
+            : 'חומר ויזואלי נטען — המומחים ינתחו את התמונה/המסך'
           : material.sourceUrl
             ? 'מטא-דאטה מהקישור נאספה'
             : 'הקשר טקסטואלי מוכן'
@@ -83,7 +95,7 @@ export function Wizard() {
         formData.name.trim() || deriveProjectName(material, formData.url);
 
       const newProj = {
-        id: 'proj-' + Date.now(),
+        id: projectId,
         ...formData,
         name: projectName,
         url: displayUrl,
@@ -121,8 +133,10 @@ export function Wizard() {
           {prepareError && (
             <p className="text-[var(--color-podium-danger)] text-sm font-semibold mt-2">{prepareError}</p>
           )}
-          {materialPreview?.imageDataUrl && !prepareError && (
-            <p className="text-[var(--color-podium-success)] text-xs mt-1">תמונה/מסך יישלחו למודל הראייה</p>
+          {materialHasStoredImage(materialPreview ?? undefined) && !prepareError && (
+            <div className="mt-4 max-w-md mx-auto">
+              <MaterialPreview material={materialPreview ?? undefined} compact />
+            </div>
           )}
         </div>
       </div>
@@ -237,6 +251,9 @@ export function Wizard() {
                           ...formData,
                           url: files.map((f: File) => f.name).join(', '),
                         });
+                        const firstImage = files.find((f) => f.type.startsWith('image/'));
+                        if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
+                        setLocalPreviewUrl(firstImage ? URL.createObjectURL(firstImage) : null);
                       }
                     }}
                   />
@@ -245,9 +262,16 @@ export function Wizard() {
               </div>
               {uploadedFiles.length > 0 && (
                 <p className="text-xs text-[var(--color-podium-text-secondary)]">
-                  קבצים: {uploadedFiles.map((f) => f.name).join(', ')} — יועלו ויישלחו לניתוח ויזואלי (תמונה או פריים
-                  מסרטון).
+                  קבצים: {uploadedFiles.map((f) => f.name).join(', ')} — יישמרו בתיקיית השרת (.data/uploads) ויישלחו
+                  לניתוח ויזואלי.
                 </p>
+              )}
+              {(localPreviewUrl || getMaterialPreviewUrl(materialPreview ?? undefined)) && (
+                <MaterialPreview
+                  material={materialPreview ?? undefined}
+                  localPreviewUrl={localPreviewUrl}
+                  compact
+                />
               )}
               <p className="text-xs text-[var(--color-podium-text-tertiary)]">
                 הניתוח מבוסס על החומר שהעליתם — לא על תרחיש דמו. קישור נסרק בשרת; תמונה/וידאו נשלחים למודל הראייה.
